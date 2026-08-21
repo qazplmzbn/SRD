@@ -1,0 +1,145 @@
+# =============================================
+# VIS4SRD 根目录 .gitignore
+# =============================================
+
+# ---- Python（后端）----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+env/
+.venv/
+
+# ---- IDE ----
+.idea/
+*.swp
+*.swo
+*.swn
+
+# ---- Testing ----
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---- Environment variables ----
+.env
+.env.local
+.env.*.local
+# 不忽略 .env.example（示例文件）
+!.env.example
+
+# ---- Uploads（后端）----
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ---- Logs ----
+*.log
+logs/
+.dev-logs/
+.playwright-cli/
+backend/jieba.cache
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Node.js（前端）----
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+frontend/output-chat-desktop.png
+frontend/public/reddit_500.csv
+
+# ---- Build outputs ----
+frontend/dist/
+frontend/build/
+*.tgz
+
+# ---- Temporary files ----
+*.tmp
+*.temp
+.cache/
+tmp/
+temp/
+tmp_*.json
+
+# ---- Docker ----
+# 注意：deploy/docker-compose.server.yml 和 Dockerfile*.server 是生产部署必需文件
+# 不忽略各目录内的 .dockerignore（它们在 docker build 时有用）
+!backend/.dockerignore
+!frontend/.dockerignore
+
+# ---- Cursor / Agent rules ----
+.cursor/
+.agent-transcripts/
+AGENTS.md
+
+# ---- Project docs (not needed in repo) ----
+VIS4SRD前端页面架构图.md
+VIS4SRD前端页面架构图.pdf
+后端设计说明.md
+
+# ---- External data (large files) ----
+数据/
+map_data/
+datasets/
+Emocc/
+
+# ---- ML model files ----
+*.pkl
+*.pickle
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.hdf5
+
+# ---- Database backups ----
+*.sql.bak
+*.bak.sql
+
+# ---- Misc ----
+*.bak
+*.swp
+*.DS_Store
+backend/outputs/
+output/
+backend/=*
+
+
+# Java / 推理侧车
+backend/target/
+inference-python/.venv/
+uploads/**
+!uploads/**/.gitkeep
+
+# FeaLearner 大目录（代码可留；权重已被 *.pth/*.pkl 挡住）
+# 若权重目录很大、不想扫文件，可整目录忽略：
+# Fealeaner/
+
+# 个人迭代 / 本地文档
+docs/
+.dev-logs/
+output/
+deploy/production/.env.production
+AGENTS.md

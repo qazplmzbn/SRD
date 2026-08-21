@@ -1,0 +1,233 @@
+{
+  "code": "GAD-7",
+  "name": "广泛性焦虑量表",
+  "full_name": "Generalized Anxiety Disorder-7",
+  "version": "Chinese Prototype Pack v1.0",
+  "category": "anxiety",
+  "description": "GAD-7 用于评估过去两周内的焦虑严重程度，可与抑郁、睡眠等量表联动分析。",
+  "purpose": "焦虑筛查",
+  "system_classification": {
+    "tier": "core_default",
+    "tier_label": "核心默认量表",
+    "clinical_role": "screening"
+  },
+  "source_url": "https://www.mytopcare.org/wp-content/uploads/2013/06/gad7-validation.pdf",
+  "original_paper": "Spitzer RL, Kroenke K, Williams JBW, Lowe B. A brief measure for assessing generalized anxiety disorder: the GAD-7. Arch Intern Med. 2006;166(10):1092-1097.",
+  "license_note": "当前系统题干来自中文原型改写包，仅适用于课程项目、系统原型和演示。正式临床部署前应核对授权中文版、机构使用规范与伦理要求。",
+  "validated_population": "适用于普通成人、基层医疗和高校/社区焦虑筛查；中文人群已有验证研究。",
+  "screening_only": true,
+  "estimated_minutes": 3,
+  "total_questions": 7,
+  "instruction": "请根据您过去两周内的实际情况，选择每一项描述与您相符的频率。",
+  "scoring": {
+    "type": "sum",
+    "max_score": 21
+  },
+  "thresholds": [
+    {
+      "min": 0,
+      "max": 4,
+      "level": "无或极轻微焦虑",
+      "label": "无或极轻微焦虑",
+      "risk_level": "low",
+      "suggestion": "保持观察，可结合心理健康教育。"
+    },
+    {
+      "min": 5,
+      "max": 9,
+      "level": "轻度焦虑",
+      "label": "轻度焦虑",
+      "risk_level": "low",
+      "suggestion": "建议关注压力源和睡眠，可推荐放松训练。"
+    },
+    {
+      "min": 10,
+      "max": 14,
+      "level": "中度焦虑",
+      "label": "中度焦虑",
+      "risk_level": "medium",
+      "suggestion": "建议心理咨询或精神心理科进一步评估。"
+    },
+    {
+      "min": 15,
+      "max": 21,
+      "level": "重度焦虑",
+      "label": "重度焦虑",
+      "risk_level": "high",
+      "suggestion": "建议尽快专业评估并进行干预。"
+    }
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "text": "感到紧张、焦虑或坐立不安",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "text": "无法停止或控制担忧",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "text": "对各种事情担心得过多",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "text": "很难放松下来",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "text": "坐立不安，以至于难以安静坐着",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "text": "容易烦躁或易怒",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "text": "感到好像会发生可怕的事情",
+      "dimension": "anxiety",
+      "reverse": false,
+      "options": [
+        {
+          "value": 0,
+          "label": "完全没有"
+        },
+        {
+          "value": 1,
+          "label": "有几天"
+        },
+        {
+          "value": 2,
+          "label": "一半以上时间"
+        },
+        {
+          "value": 3,
+          "label": "几乎每天"
+        }
+      ]
+    }
+  ],
+  "special_rules": [],
+  "interpretation": "总分越高代表焦虑困扰越明显；达到中度及以上建议进行进一步专业评估。",
+  "references": "题目、选项、评分规则来自 psychological_scale_csv_pack；正式部署前请核对中文版授权、版权与临床适用范围。"
+}

@@ -1,0 +1,72 @@
+server:
+  port: ${PORT:8000}
+  address: ${HOST:0.0.0.0}
+
+spring:
+  application:
+    name: vis4srd-backend
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 120MB
+
+# MySQL（主业务库）—— 变量名与 Python backend 对齐
+app:
+  datasource:
+    mysql:
+      jdbc-url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:vis4srd}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      username: root
+      password: 123456
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      maximum-pool-size: 10
+      minimum-idle: 2
+    postgres:
+      jdbc-url: jdbc:postgresql://${PG_HOST:127.0.0.1}:${PG_PORT:5432}/${PG_NAME:mental_health}
+      username: ${PG_USER:postgres}
+      password: ${PG_PASSWORD:postgres}
+      driver-class-name: org.postgresql.Driver
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jwt:
+    secret: ${JWT_SECRET_KEY:dev_secret_key_change_in_production}
+    algorithm: ${JWT_ALGORITHM:HS256}
+    expire-minutes: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:1440}
+  amap:
+    key: ${AMAP_WEB_SERVICE_KEY:}
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+      - http://localhost:3000
+      - http://127.0.0.1:3000
+  datasets:
+    dir: ${DATASETS_DIR:../datasets}
+  llm:
+    model: ${LLM_MODEL:qwen-flash}
+    api-key: ${LLM_API_KEY:}
+    base-url: ${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  python-inference:
+    base-url: ${PYTHON_INFERENCE_BASE_URL:http://127.0.0.1:8001}
+    connect-timeout-ms: 3000
+    read-timeout-ms: 180000
+    fallback-heuristic: true
+  upload:
+    archive:
+      archives-dir: ${ARCHIVE_UPLOAD_DIR:../uploads/archives}
+      templates-dir: ${ARCHIVE_TEMPLATE_DIR:../datasets/archives}
+  knowledge:
+    # 相对 backend 工作目录；RAG 语料在项目根 knowledge/，上传在 uploads/
+    root-dir: ${KNOWLEDGE_ROOT_DIR:../knowledge}
+    upload-dir: ${KNOWLEDGE_UPLOAD_DIR:../uploads/knowledge}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+logging:
+  level:
+    com.vis4srd: INFO
+    org.springframework.security: WARN

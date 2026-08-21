@@ -1,0 +1,1931 @@
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Upload, Search, RefreshCw, Eye, FileText, X,
+  ChevronLeft, ChevronRight, Check, User,
+  Download, Filter, BarChart3, Clock, AlertTriangle,
+  FileStack, Activity, Database, FileText as FileIcon,
+  CheckCircle, XCircle, Plus, Info, Trash2, Layers
+} from 'lucide-react';
+import {
+  fetchDatasets,
+  fetchArchives,
+  fetchHomeStats,
+  deleteArchive,
+  deleteArchives,
+  uploadArchiveCSV,
+  confirmArchiveImport,
+  fetchArchiveTemplates,
+  type DatasetProfile,
+  type ArchiveTemplateMeta,
+} from '../api';
+import { formatDateTime } from '../utils/dateFormat';
+import PaperStatCard from '../components/PaperStatCard';
+import ActionCapsuleButton from '../components/ActionCapsuleButton';
+
+// ==================== 类型定义 ====================
+
+interface ArchiveRecord {
+  id: string;
+  userId: string;
+  dataSource: 'reddit';
+  postCount: number;
+  riskOverview: '高风险' | '中风险' | '低风险';
+  importTime: string;
+  lastActive?: string;
+  status: 'importing' | 'ready' | 'analyzing';
+  userStats?: {
+    male: number;
+    female: number;
+    unknown: number;
+  };
+}
+
+interface PostRecord {
+  id: string;
+  userId: string;
+  postIndex: number;
+  postCount: number;  // 该用户的总帖子数
+  content: string;
+  sentimentScore: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  riskScore: number;
+  suicideRisk?: number | string; // 原始风险值（用于细粒度标签）
+  microExpressions?: string[];
+  timestamp?: string;
+  hasTimestamp: boolean;
+  emjioSequence?: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  isMissing?: boolean;
+  isAnomaly?: boolean;
+}
+
+interface ImportStep {
+  id: number;
+  label: string;
+  status: 'active' | 'completed' | 'pending';
+}
+
+interface UserReviewRow {
+  userId: string;
+  posts: PostRecord[];
+  riskLevel: 'low' | 'medium' | 'high';
+  suicideRisk?: number | string;
+  timestamps: string[];
+  emojiPreview: string[];
+}
+
+// ==================== 常量配置 ====================
+
+const DATA_SOURCES = [
+  { value: '', label: '全部数据源' },
+  { value: 'reddit', label: 'Reddit系列' },
+  { value: 'bigdata', label: 'Bigdata系列' },
+  { value: 'sigir', label: 'SIGIR系列' },
+  { value: 'weibo', label: 'Weibo系列' },
+];
+
+const DATA_SOURCE_LABELS: Record<string, string> = {
+  reddit: 'Reddit系列',
+  bigdata: 'Bigdata系列',
+  sigir: 'SIGIR系列',
+  weibo: 'Weibo系列',
+};
+
+const DATA_SOURCE_COLORS: Record<string, string> = {
+  reddit: 'bg-[#E8F0FF] text-[#2F6BFF]',
+  bigdata: 'bg-[#EEF7FF] text-[#0F6CBD]',
+  sigir: 'bg-[#F5F0FF] text-[#7C3AED]',
+  weibo: 'bg-[#FFF4E8] text-[#EA580C]',
+};
+
+const RISK_COLORS = {
+  low: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-300', badge: 'bg-green-500', light: 'bg-green-50' },
+  medium: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-300', badge: 'bg-yellow-500', light: 'bg-yellow-50' },
+  high: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-300', badge: 'bg-red-500', light: 'bg-red-50' },
+};
+
+const RISK_LABELS: Record<string, string> = { low: '低风险', medium: '中风险', high: '高风险' };
+void RISK_LABELS;
+
+const FIELD_LABELS: Record<string, string> = {
+  user_id: '用户ID',
+  user: '用户ID',
+  created_utc: '时间戳',
+  timestamp: '时间戳',
+  time: '时间戳',
+  post_sequence: '帖子序列',
+  post: '贴文内容',
+  content: '贴文内容',
+  text: '贴文内容',
+  emjio_sequence: '表情序列',
+  emjio_sequenc: '表情序列',
+  emoji_sequence: '表情序列',
+  label: '风险标签',
+  suicide_risk: '风险标签',
+};
+
+// ==================== 细粒度风险等级系统（按数据集动态生成）====================
+// 详见 .cursor/rules/risk-level-spec.mdc
+
+// 细粒度风险标签映射（根据数据集）- 仅保留 reddit 五分类
+const FINE_RISK_LABELS: Record<string, Record<number, string>> = {
+  reddit: { 0: '无风险', 1: '极低风险', 2: '低风险', 3: '中风险', 4: '高风险' }, // 五分类
+  bigdata: { 0: '无风险', 1: '低风险', 2: '中风险', 3: '高风险' },
+  sigir: { 0: '无风险', 1: '高风险' },
+  weibo: { 0: '无风险', 1: '高风险' },
+};
+
+// 粗粒度风险等级映射（用于颜色/统一显示）
+const COARSE_RISK_MAP: Record<string, Record<number, 'low' | 'medium' | 'high'>> = {
+  reddit: { 0: 'low', 1: 'low', 2: 'medium', 3: 'medium', 4: 'high' },
+  bigdata: { 0: 'low', 1: 'low', 2: 'medium', 3: 'high' },
+  sigir: { 0: 'low', 1: 'high' },
+  weibo: { 0: 'low', 1: 'high' },
+};
+
+// 获取细粒度风险标签（优先使用动态映射，兜底使用静态默认值）
+function getFineRiskLabel(riskValue: number | string, dataSource: string, dynamicMap?: Record<string, Record<number, string>>): string {
+  const risk = typeof riskValue === 'string' ? parseInt(riskValue) : riskValue;
+  const labels = dynamicMap?.[dataSource] ?? FINE_RISK_LABELS[dataSource];
+  if (labels && labels[risk] !== undefined) {
+    return labels[risk];
+  }
+  return `风险${risk}`;
+}
+
+// 获取粗粒度风险等级（优先使用动态映射，兜底使用静态默认值）
+function getCoarseRiskLevel(riskValue: number | string, dataSource: string, dynamicMap?: Record<string, Record<number, 'low' | 'medium' | 'high'>>): 'low' | 'medium' | 'high' {
+  const risk = typeof riskValue === 'string' ? parseInt(riskValue) : riskValue;
+  const map = dynamicMap?.[dataSource] ?? COARSE_RISK_MAP[dataSource];
+  if (map && map[risk] !== undefined) {
+    return map[risk];
+  }
+  return 'medium';
+}
+
+// 计算风险分布（按细粒度分类聚合）
+function calculateRiskDistribution(records: { suicideRisk?: number | string; riskLevel: 'low' | 'medium' | 'high' }[], dataSource: string, dynamicFineMap?: Record<string, Record<number, string>>): Record<string, number> {
+  const distribution: Record<string, number> = {};
+  records.forEach(record => {
+    const label = getFineRiskLabel(record.suicideRisk ?? record.riskLevel, dataSource, dynamicFineMap);
+    distribution[label] = (distribution[label] || 0) + 1;
+  });
+  return distribution;
+}
+
+// ==================== 模拟数据 ====================
+
+// mockPosts（仅用于演示，真实贴文通过 fetchCSVPUserPosts API 获取）
+const _mockPosts: PostRecord[] = [
+  { id: 'p1', userId: 'user_hash_01', postIndex: 1, postCount: 5, content: '今天又失眠了，感觉生活没有意义。好累啊...', sentimentScore: 0.92, riskLevel: 'high', riskScore: 0.92, timestamp: '2024-03-15 14:30', hasTimestamp: true, microExpressions: ['sad', 'tired', 'despair'], status: 'accepted' },
+  { id: 'p2', userId: 'user_hash_01', postIndex: 2, postCount: 5, content: '有时候真的很想就这样结束一切...', sentimentScore: 0.85, riskLevel: 'high', riskScore: 0.85, timestamp: '2024-03-10 20:15', hasTimestamp: true, microExpressions: ['hopeless', 'despair'], status: 'accepted' },
+];
+void _mockPosts;
+
+// ==================== 导入向导弹窗组件 ====================
+
+function ImportWizardModal({
+  isOpen,
+  onClose,
+  onImportComplete,
+  dataSourceOptions = DATA_SOURCES,
+  dataSourceLabels = DATA_SOURCE_LABELS,
+  fineRiskLabels = FINE_RISK_LABELS,
+  coarseRiskMap = COARSE_RISK_MAP,
+  archiveTemplates = {},
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onImportComplete?: () => void;  // 导入完成回调，通知父组件刷新列表
+  dataSourceOptions?: { value: string; label: string }[];
+  dataSourceLabels?: Record<string, string>;
+  fineRiskLabels?: Record<string, Record<number, string>>;
+  coarseRiskMap?: Record<string, Record<number, 'low' | 'medium' | 'high'>>;
+  archiveTemplates?: Record<string, ArchiveTemplateMeta>;
+}) {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [selectedSource, setSelectedSource] = useState('');
+  const [dataFile, setDataFile] = useState<File | null>(null);
+  const [importedData, setImportedData] = useState<PostRecord[]>([]);
+  const [userStatuses, setUserStatuses] = useState<Record<string, 'pending' | 'accepted' | 'rejected'>>({});
+  /** 复选框：仅表示该用户行是否被选中，与接受/拒绝无关 */
+  const [selectedUserIds, setSelectedUserIds] = useState<Record<string, boolean>>({});
+  const [isManualAnnotation, setIsManualAnnotation] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
+  // 保存上传结果，用于步骤2确认导入
+  const [uploadResult, setUploadResult] = useState<{
+    datasetKey: string;
+    filePath: string;
+    totalUsers: number;
+    totalPosts: number;
+  } | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [templateType, setTemplateType] = useState<'excel' | 'txt'>('excel');
+  const [selectedFields, setSelectedFields] = useState<string[]>(['user_id', 'created_utc', 'post_sequence', 'emjio_sequence', 'suicide_risk']);
+  const [_detectedFields, setDetectedFields] = useState<string[]>([]);
+  void setDetectedFields; // used in parse logic
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const FILE_MAX_SIZE = 20 * 1024 * 1024; // 20M
+  const selectedTemplate = selectedSource ? archiveTemplates[selectedSource] : undefined;
+
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    const templateFields = [
+      ...selectedTemplate.requiredColumns.map(field => field.name.toLowerCase()),
+      ...selectedTemplate.optionalColumns.map(field => field.name.toLowerCase()),
+    ];
+    setSelectedFields(Array.from(new Set(templateFields)));
+  }, [selectedTemplate]);
+
+  const buildUserStatuses = (records: PostRecord[]) => {
+    const statuses: Record<string, 'pending' | 'accepted' | 'rejected'> = {};
+    Array.from(new Set(records.map(record => record.userId))).forEach((userId) => {
+      statuses[userId] = 'pending';
+    });
+    return statuses;
+  };
+
+  // 解析CSV/TXT文件
+  const parseCSVFile = async (file: File): Promise<{ data: PostRecord[]; fields: string[]; totalPostCount: number }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const text = e.target?.result as string;
+          const lines = text.split('\n').filter(line => line.trim());
+          if (lines.length <= 1) {
+            resolve({ data: [], fields: [], totalPostCount: 0 });
+            return;
+          }
+
+          // 检测分隔符：优先TAB，其次逗号
+          const firstLine = lines[0];
+          const delimiter = firstLine.includes('\t') ? '\t' : ',';
+
+          // 正确的 CSV 解析函数（处理引号内的逗号）
+          const parseCSVLine = (line: string): string[] => {
+            const values: string[] = [];
+            let current = '';
+            let inQuotes = false;
+            let quoteChar = '';
+
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+
+              if (!inQuotes && (char === '"' || char === "'")) {
+                inQuotes = true;
+                quoteChar = char;
+              } else if (inQuotes && char === quoteChar) {
+                // 检查是否是转义引号
+                if (line[i + 1] === quoteChar) {
+                  current += char;
+                  i++; // 跳过下一个引号
+                } else {
+                  inQuotes = false;
+                }
+              } else if (!inQuotes && char === delimiter) {
+                values.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            values.push(current.trim()); // 最后一个字段
+            return values;
+          };
+
+          const headers = parseCSVLine(firstLine).map(h => h.toLowerCase());
+          const data: PostRecord[] = [];
+          let totalPostCount = 0;
+
+          for (let i = 1; i < lines.length; i++) {
+            const values = parseCSVLine(lines[i]);
+            const getValue = (key: string) => {
+              const idx = headers.indexOf(key);
+              return idx >= 0 ? values[idx] || '' : '';
+            };
+
+            const suicideRisk = getValue('label') || getValue('suicide_risk');
+            const parsedRisk = isNaN(parseInt(suicideRisk)) ? suicideRisk : parseInt(suicideRisk);
+
+            // 解析帖子列表（支持 Python list 格式 ['post1', 'post2']）
+            // 优先从 post_sequence 列获取帖子列表
+            const postStr = getValue('post_sequence') || getValue('post') || getValue('content') || getValue('text') || '';
+            const posts = parsePostList(postStr);
+
+            // 解析表情序列（逗号分隔的字符串）
+            const emjioStr = getValue('emjio_sequence') || getValue('emoji_sequence') || '';
+            const emjioList = emjioStr.split(',').map(e => e.trim()).filter(e => e);
+
+            // 获取用户ID
+            const userId = getValue('user') || getValue('user_id') || 'unknown';
+
+            if (posts.length > 0) {
+              // 每个帖子创建一条记录
+              posts.forEach((postContent: string, postIdx: number) => {
+                totalPostCount++;
+                // 获取该帖子对应的表情序列（如果有的话）
+                const postEmoji = emjioList[postIdx] || emjioList[0] || '';
+                data.push({
+                  id: `imported_${i}_${postIdx}`,
+                  userId: userId,
+                  postIndex: postIdx + 1,
+                  postCount: posts.length,  // 该用户的总帖子数
+                  content: postContent,
+                  sentimentScore: parseFloat(getValue('sentiment') || getValue('sentiment_score') || '0.5'),
+                  suicideRisk: parsedRisk,
+                  riskLevel: parseRiskLevel(suicideRisk),
+                  riskScore: parseFloat(getValue('risk_score') || '0.5'),
+                  timestamp: getValue('created_utc') || getValue('timestamp') || getValue('time') || undefined,
+                  hasTimestamp: !!getValue('created_utc') || !!getValue('timestamp') || !!getValue('time'),
+                  emjioSequence: postEmoji,
+                  status: 'pending',
+                });
+              });
+            } else {
+              // 如果没有帖子内容，仍创建一条记录
+              totalPostCount++;
+              data.push({
+                id: `imported_${i}`,
+                userId: userId,
+                postIndex: 1,
+                postCount: 1,
+                content: postStr,
+                sentimentScore: parseFloat(getValue('sentiment') || getValue('sentiment_score') || '0.5'),
+                suicideRisk: parsedRisk,
+                riskLevel: parseRiskLevel(suicideRisk),
+                riskScore: parseFloat(getValue('risk_score') || '0.5'),
+                timestamp: getValue('created_utc') || getValue('timestamp') || getValue('time') || undefined,
+                hasTimestamp: !!getValue('created_utc') || !!getValue('timestamp') || !!getValue('time'),
+                emjioSequence: emjioList[0] || '',
+                status: 'pending',
+              });
+            }
+          }
+          resolve({ data, fields: headers, totalPostCount });
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  };
+
+  // 解析帖子列表（支持 Python list 格式和 CSV 转义引号 ""）
+  const parsePostList = (postStr: string): string[] => {
+    if (!postStr) return [];
+    let trimmed = postStr.trim();
+
+    // 如果被双引号包裹（来自CSV解析），移除双引号
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      trimmed = trimmed.slice(1, -1);
+    }
+
+    // 检查是否是 Python list 格式 [...]
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        // 移除首尾方括号
+        const inner = trimmed.slice(1, -1);
+        const posts: string[] = [];
+
+        let current = '';
+        let inQuote = false;
+        let depth = 0;
+
+        for (let i = 0; i < inner.length; i++) {
+          const char = inner[i];
+
+          // 处理 CSV 转义的双引号 ""
+          if (!inQuote && char === '"' && inner[i + 1] === '"') {
+            current += '"';
+            i++; // 跳过下一个双引号
+            continue;
+          }
+
+          if (!inQuote && char === '"') {
+            inQuote = true;
+          } else if (inQuote && char === '"') {
+            // 检查是否是转义的双引号 """
+            if (inner[i + 1] === '"') {
+              current += '"';
+              i++; // 跳过下一个双引号
+            } else {
+              inQuote = false;
+            }
+          } else if (!inQuote && char === '[') {
+            depth++;
+            current += char;
+          } else if (!inQuote && char === ']') {
+            depth--;
+            current += char;
+          } else if (!inQuote && char === ',' && depth === 0) {
+            const post = current.trim();
+            if (post) {
+              posts.push(post);
+            }
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+
+        // 处理最后一个帖子
+        const lastPost = current.trim();
+        if (lastPost) {
+          posts.push(lastPost);
+        }
+
+        if (posts.length > 0) {
+          return posts;
+        }
+      } catch (err) {
+        console.warn('Failed to parse post list:', err);
+      }
+    }
+
+    // 如果不是列表格式，检查是否包含换行符分隔的多个帖子
+    if (trimmed.includes('\n')) {
+      const parts = trimmed.split('\n').filter(p => p.trim());
+      if (parts.length > 1) {
+        return parts;
+      }
+    }
+
+    return [trimmed];
+  };
+
+  // 解析风险等级
+  const parseRiskLevel = (value: string): 'low' | 'medium' | 'high' => {
+    const v = value.toLowerCase().trim();
+    if (v.includes('high') || v.includes('高')) return 'high';
+    if (v.includes('low') || v.includes('低')) return 'low';
+    return 'medium';
+  };
+
+  // 处理文件选择
+  const handleFileSelect = async (file: File) => {
+    // 文件大小检查
+    if (file.size > FILE_MAX_SIZE) {
+      setUploadError(`文件大小超过限制（${(file.size / 1024 / 1024).toFixed(2)} MB），最大支持 20MB`);
+      return;
+    }
+
+    setDataFile(file);
+    setUploadError(null);
+
+    // 解析文件内容
+    if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
+      try {
+        const { data: parsedData, fields } = await parseCSVFile(file);
+        setDetectedFields(fields);
+        if (parsedData.length > 0) {
+          setImportedData(parsedData);
+          setSelectedUserIds({});
+          setUserStatuses(buildUserStatuses(parsedData));
+          // 标记文件已解析
+          setDataFileParsed(parsedData);
+        } else {
+          const mockData = [
+            { id: 'imp1', userId: 'new_user_01', postIndex: 1, postCount: 1, content: '测试数据1 - 请检查文件格式', sentimentScore: 0.5, riskLevel: 'medium' as const, riskScore: 0.5, timestamp: new Date().toISOString().split('T')[0], hasTimestamp: true, emjioSequence: '', status: 'pending' as const },
+          ];
+          setImportedData(mockData);
+          setSelectedUserIds({});
+          setUserStatuses(buildUserStatuses(mockData));
+          setDataFileParsed(mockData);
+        }
+      } catch (err) {
+        console.error('解析文件失败:', err);
+        setUploadError('文件解析失败，请检查文件格式');
+      }
+    } else {
+      setImportedData([]);
+      setDataFileParsed([]);
+    }
+  };
+
+  // 保存已解析的文件数据（用于在 handleImport 中使用）
+  const [dataFileParsed, setDataFileParsed] = useState<PostRecord[]>([]);
+
+  // 拖拽处理
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      const validTypes = ['.csv', '.txt', '.xlsx'];
+      const isValid = validTypes.some(type => file.name.toLowerCase().endsWith(type));
+      if (isValid) {
+        handleFileSelect(file);
+      } else {
+        setUploadError('请上传 CSV、TXT 或 Excel(.xlsx) 文件');
+      }
+    }
+  };
+
+  // 上传文件到 uploads/archives/ 目录
+  const uploadFile = async (file: File, source: string): Promise<{ success: boolean; filePath?: string; data?: any; error?: string }> => {
+    try {
+      // 调用后端 API 上传文件
+      const result = await uploadArchiveCSV(file, source);
+      return { success: true, filePath: result.filePath, data: result };
+    } catch (err: any) {
+      console.error('上传文件失败:', err);
+      return { success: false, error: err?.message || '上传失败，请重试' };
+    }
+  };
+
+  const handleImport = async () => {
+    if (!selectedSource || !dataFile) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    // 模拟上传进度
+    const progressInterval = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return prev;
+        }
+        return prev + 10;
+      });
+    }, 200);
+
+    try {
+      // 步骤1：上传文件
+      const uploadResult = await uploadFile(dataFile, selectedSource);
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      if (uploadResult.success && uploadResult.data) {
+        // 跳转到步骤2，使用前端解析的完整数据而不是后端 preview
+        // 使用 dataFileParsed（保存的解析结果）而不是 importedData（React状态可能有延迟）
+        if (dataFileParsed.length > 0) {
+          // 使用前端已解析的完整数据（包含 timestamp, emjioSequence 等所有字段）
+          setImportedData([...dataFileParsed]);
+          setUserStatuses(buildUserStatuses(dataFileParsed));
+        } else {
+          // 如果没有前端解析数据，则使用后端 preview（兜底）
+          const previewData = uploadResult.data.preview || [];
+          const newData = previewData.map((p: any, idx: number) => ({
+            id: `imported_${idx}`,
+            userId: p.userId,
+            postIndex: idx,
+            postCount: p.postCount || 1,
+            content: p.firstPost || '',
+            sentimentScore: 0.5,
+            suicideRisk: p.riskValue,
+            riskLevel: _getRiskLevel(p.riskValue),
+            riskScore: p.riskValue / 4,
+            timestamp: undefined,
+            hasTimestamp: false,
+            emjioSequence: undefined,
+            status: 'pending' as const,
+            isMissing: false,
+            isAnomaly: false,
+          }));
+          setImportedData(newData);
+          setUserStatuses(buildUserStatuses(newData));
+        }
+
+        // 保存上传结果，用于步骤2确认导入
+        setUploadResult({
+          datasetKey: uploadResult.data.datasetKey,
+          filePath: uploadResult.data.filePath,
+          totalUsers: uploadResult.data.totalUsers,
+          totalPosts: uploadResult.data.totalPosts,
+        });
+
+        // 跳转到步骤2
+        setCurrentStep(2);
+      } else {
+        setUploadError(uploadResult.error || '上传失败');
+      }
+    } catch (err) {
+      clearInterval(progressInterval);
+      setUploadError('上传过程出现错误');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // 根据风险值获取粗粒度风险等级
+  const _getRiskLevel = (value: number | string): 'low' | 'medium' | 'high' => {
+    const v = typeof value === 'string' ? parseInt(value) : value;
+    if (v >= 3) return 'high';
+    if (v >= 2) return 'medium';
+    return 'low';
+  };
+
+  /** 批量接受：仅对选中的行生效；若未选任何行则对全部生效，操作后清空复选框 */
+  const handleAcceptAll = () => {
+    const selectedIds = userReviewRows.filter(row => selectedUserIds[row.userId]).map(row => row.userId);
+    const targetIds = selectedIds.length > 0 ? selectedIds : userReviewRows.map(row => row.userId);
+    setUserStatuses(prev => {
+      const next = { ...prev };
+      targetIds.forEach(id => { next[id] = 'accepted'; });
+      return next;
+    });
+    setSelectedUserIds({});
+  };
+
+  /** 批量拒绝：仅对选中的行生效；若未选任何行则对全部生效，操作后清空复选框 */
+  const handleRejectAll = () => {
+    const selectedIds = userReviewRows.filter(row => selectedUserIds[row.userId]).map(row => row.userId);
+    const targetIds = selectedIds.length > 0 ? selectedIds : userReviewRows.map(row => row.userId);
+    setUserStatuses(prev => {
+      const next = { ...prev };
+      targetIds.forEach(id => { next[id] = 'rejected'; });
+      return next;
+    });
+    setSelectedUserIds({});
+  };
+
+  /** 切换某个用户行是否选中（仅选中状态，与接受/拒绝无关） */
+  const toggleRowSelected = (userId: string) => {
+    setSelectedUserIds(prev => ({ ...prev, [userId]: !prev[userId] }));
+  };
+
+  /** 全选/取消全选（仅选中状态） */
+  const toggleSelectAll = () => {
+    const allSelected = userReviewRows.length > 0 && userReviewRows.every(row => selectedUserIds[row.userId]);
+    if (allSelected) {
+      setSelectedUserIds({});
+    } else {
+      const next: Record<string, boolean> = {};
+      userReviewRows.forEach(row => { next[row.userId] = true; });
+      setSelectedUserIds(next);
+    }
+  };
+
+  // 步骤2：确认导入数据到数据库
+  const handleConfirmImport = async () => {
+    if (!uploadResult) {
+      setUploadError('上传结果已过期，请重新上传');
+      return;
+    }
+
+    setIsConfirming(true);
+    setUploadError(null);
+
+    try {
+      // 获取被接受的记录（status === 'accepted' 的记录）
+      const acceptedRecords = userReviewRows
+        .filter(row => userStatuses[row.userId] === 'accepted')
+        .map(row => row.userId);
+
+      // 如果没有手动接受任何记录，默认全部接受
+      const recordsToImport = acceptedRecords.length > 0
+        ? acceptedRecords
+        : userReviewRows.map(row => row.userId);
+
+      // 调用后端确认导入 API
+      const result = await confirmArchiveImport({
+        datasetKey: uploadResult.datasetKey,
+        filePath: uploadResult.filePath,
+        dataSource: selectedSource,
+        acceptedRecords: recordsToImport,
+        isManualAnnotation,
+      });
+
+      if (result.success) {
+        // 导入成功，跳转到步骤3
+        setCurrentStep(3);
+      } else {
+        setUploadError(result.message || '导入失败');
+      }
+    } catch (err: any) {
+      console.error('确认导入失败:', err);
+      setUploadError(err?.message || '确认导入失败，请重试');
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  const handleComplete = () => {
+    // 调用回调通知父组件刷新列表
+    if (onImportComplete) {
+      onImportComplete();
+    }
+    onClose();
+    setCurrentStep(1);
+    setSelectedSource('');
+    setDataFile(null);
+    setImportedData([]);
+    setSelectedUserIds({});
+    setUserStatuses({});
+    setIsManualAnnotation(false);
+    setUploadProgress(0);
+    setUploadError(null);
+    setUploadResult(null);
+    setSelectedFields([]);
+  };
+
+  const steps: ImportStep[] = [
+    { id: 1, label: '上传文件', status: currentStep >= 1 ? (currentStep > 1 ? 'completed' : 'active') : 'pending' },
+    { id: 2, label: '检查数据', status: currentStep >= 2 ? (currentStep > 2 ? 'completed' : 'active') : 'pending' },
+    { id: 3, label: '完成', status: currentStep >= 3 ? 'active' : 'pending' },
+  ];
+
+  // 自动计算用户数（去重user_id数量）
+  const uniqueUserCount = new Set(importedData.map(d => d.userId)).size;
+
+  const userReviewRows = useMemo<UserReviewRow[]>(() => {
+    const grouped = new Map<string, UserReviewRow>();
+    importedData.forEach((record) => {
+      const existing = grouped.get(record.userId);
+      if (existing) {
+        existing.posts.push(record);
+        if (record.timestamp) {
+          existing.timestamps.push(record.timestamp);
+        }
+        if (record.emjioSequence) {
+          existing.emojiPreview.push(record.emjioSequence);
+        }
+        const nextRisk = typeof record.suicideRisk === 'number' ? record.suicideRisk : parseInt(String(record.suicideRisk ?? ''), 10);
+        const currentRisk = typeof existing.suicideRisk === 'number' ? existing.suicideRisk : parseInt(String(existing.suicideRisk ?? ''), 10);
+        if (!Number.isNaN(nextRisk) && (Number.isNaN(currentRisk) || nextRisk > currentRisk)) {
+          existing.suicideRisk = record.suicideRisk;
+          existing.riskLevel = record.riskLevel;
+        }
+        return;
+      }
+      grouped.set(record.userId, {
+        userId: record.userId,
+        posts: [record],
+        riskLevel: record.riskLevel,
+        suicideRisk: record.suicideRisk,
+        timestamps: record.timestamp ? [record.timestamp] : [],
+        emojiPreview: record.emjioSequence ? [record.emjioSequence] : [],
+      });
+    });
+    return Array.from(grouped.values());
+  }, [importedData]);
+
+  // 根据suicide_risk列的值自动计算细粒度风险等级数
+  const uniqueRiskLevels = new Set(importedData.map(d => d.suicideRisk ?? d.riskLevel));
+  const fineRiskCount = uniqueRiskLevels.size;
+
+  // 计算细粒度风险分布（使用动态风险映射）
+  const riskDistribution = calculateRiskDistribution(importedData, selectedSource, fineRiskLabels);
+  const availableFields = useMemo(() => {
+    const templateFields = selectedTemplate
+      ? [
+          ...selectedTemplate.requiredColumns.map(field => field.name.toLowerCase()),
+          ...selectedTemplate.optionalColumns.map(field => field.name.toLowerCase()),
+        ]
+      : [];
+    return Array.from(new Set([
+      ...templateFields,
+      ...selectedFields,
+    ]));
+  }, [selectedFields, selectedTemplate]);
+  const showUserField = selectedFields.includes('user_id') || selectedFields.includes('user');
+  const showTimestampField = selectedFields.includes('created_utc') || selectedFields.includes('timestamp') || selectedFields.includes('time');
+  const showPostField = selectedFields.includes('post_sequence') || selectedFields.includes('post') || selectedFields.includes('content') || selectedFields.includes('text');
+  const showEmojiField = selectedFields.includes('emjio_sequence') || selectedFields.includes('emjio_sequenc') || selectedFields.includes('emoji_sequence');
+  const showRiskField = selectedFields.includes('suicide_risk') || selectedFields.includes('label');
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-[#F7FAFD] rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden animate-scale-in border border-[#E2E8F0]">
+        {/* 头部 */}
+        <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E2E8F0]">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-sm">
+              <Database className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-[#162033]">导入心理档案数据</h3>
+              <p className="text-xs text-[#64748B]">支持多数据源导入，自动识别风险级别</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-[#F1F5FA] rounded-xl transition-colors">
+            <X className="w-5 h-5 text-[#64748B]" />
+          </button>
+        </div>
+
+        <div className="flex min-h-[480px]">
+          {/* 左侧步骤条 */}
+          <div className="w-52 bg-[#F7FAFD] p-5 border-r border-[#E2E8F0]">
+            <div className="sticky top-5">
+              <h4 className="text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-4">导入步骤</h4>
+              {steps.map((step) => (
+                <div key={step.id} className="flex items-center mb-5 last:mb-0">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold mr-3 shadow-sm transition-all ${
+                    step.status === 'completed' ? 'bg-green-500 text-white' :
+                    step.status === 'active' ? 'bg-blue-600 text-white' :
+                    'bg-[#E2E8F0] text-[#64748B]'
+                  }`}>
+                    {step.status === 'completed' ? <Check className="w-4 h-4" /> : step.id}
+                  </div>
+                  <div>
+                    <span className={`text-sm font-medium block ${
+                      step.status === 'active' ? 'text-[#162033]' : step.status === 'completed' ? 'text-green-600' : 'text-[#64748B]'
+                    }`}>{step.label}</span>
+                    {step.id === 1 && <span className="text-xs text-[#A89B8E]">选择并上传</span>}
+                    {step.id === 2 && <span className="text-xs text-[#A89B8E]">审核确认</span>}
+                    {step.id === 3 && <span className="text-xs text-[#A89B8E]">完成导入</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 右侧内容 */}
+          <div className="flex-1 p-6 overflow-y-auto bg-[#F7FAFD]">
+            {currentStep === 1 && (
+              <div className="space-y-5">
+                <div className="bg-white rounded-2xl p-5 border border-[#E2E8F0] shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-base font-bold text-[#162033] flex items-center gap-2">
+                      <FileStack className="w-5 h-5 text-[#2F6BFF]" />
+                      步骤 1：上传文件
+                    </h4>
+                  </div>
+
+                  {/* 下载模板区域 - 包含类型选择和温馨提示 */}
+                  <div className="mb-5 p-4 bg-[#F3F8FF] rounded-xl border border-[#DCE7F5]">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-[#415168]">下载模板格式：</span>
+                        <div className="flex gap-2">
+                          <label className={`flex items-center gap-2 px-4 py-2 rounded-xl cursor-pointer transition-all ${
+                            templateType === 'excel' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-[#E2E8F0] text-[#415168] hover:border-blue-300'
+                          }`}>
+                            <input type="radio" name="templateType" value="excel" checked={templateType === 'excel'}
+                              onChange={() => setTemplateType('excel')} className="sr-only" />
+                            <FileText className="w-4 h-4" />
+                            <span className="text-sm font-medium">Excel (.xlsx)</span>
+                          </label>
+                          <label className={`flex items-center gap-2 px-4 py-2 rounded-xl cursor-pointer transition-all ${
+                            templateType === 'txt' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-[#E2E8F0] text-[#415168] hover:border-blue-300'
+                          }`}>
+                            <input type="radio" name="templateType" value="txt" checked={templateType === 'txt'}
+                              onChange={() => setTemplateType('txt')} className="sr-only" />
+                            <FileIcon className="w-4 h-4" />
+                            <span className="text-sm font-medium">TXT (TAB分隔)</span>
+                          </label>
+                        </div>
+                      </div>
+                      <a
+                        href={
+                          !selectedTemplate
+                            ? '#'
+                            : templateType === 'excel'
+                              ? selectedTemplate.downloads.excel
+                              : selectedTemplate.downloads.txt
+                        }
+                        download
+                        className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-green-600 bg-gradient-to-r from-green-600 to-green-700 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:from-green-700 hover:to-green-700">
+                        <Download className="w-4 h-4" />
+                        下载{templateType === 'excel' ? 'Excel' : 'TXT'}模板
+                      </a>
+                    </div>
+                    <div className="mt-3 flex items-start gap-2">
+                      <Info className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-blue-700 mb-0.5">导入提示</p>
+                        <p className="text-xs text-blue-600 leading-relaxed">
+                          {!selectedTemplate
+                            ? '请先选择数据源，再下载对应模板。'
+                            : `请下载 ${selectedTemplate.displayName} 的${templateType === 'excel' ? ' Excel ' : ' TXT '}模板后再上传。${selectedTemplate.postSplitRule}`}
+                        </p>
+                      </div>
+                    </div>
+                    {selectedTemplate && (
+                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl bg-white p-3 border border-[#E2E8F0]">
+                          <p className="text-xs font-semibold text-[#415168] mb-2">字段要求</p>
+                          <div className="space-y-1 text-xs text-[#64748B]">
+                            {selectedTemplate.requiredColumns.map((field) => (
+                              <div key={field.name}>
+                                <span className="font-medium text-[#162033]">{field.name}</span>
+                                <span>：{field.description}</span>
+                              </div>
+                            ))}
+                            {selectedTemplate.optionalColumns.map((field) => (
+                              <div key={field.name}>
+                                <span className="font-medium text-[#415168]">{field.name}</span>
+                                <span>：{field.description}（可选）</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-white p-3 border border-[#E2E8F0]">
+                          <p className="text-xs font-semibold text-[#415168] mb-2">风险标签</p>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {Object.entries(selectedTemplate.riskLabels).map(([value, label]) => (
+                              <span key={value} className="px-2 py-1 rounded-full bg-[#F3F8FF] text-[#415168] text-xs">
+                                {value} = {label}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="text-xs font-semibold text-[#415168] mb-2">示例格式</p>
+                          <pre className="text-[11px] leading-relaxed text-[#64748B] whitespace-pre-wrap break-all">
+                            {JSON.stringify(selectedTemplate.sampleRows[0], null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 数据源选择 */}
+                  <div className="mb-5">
+                    <label className="block text-sm font-semibold text-[#415168] mb-3">选择数据源 <span className="text-red-500">*</span></label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {dataSourceOptions.slice(1).map((source) => (
+                        <label key={source.value} className={`flex items-center gap-2 p-3 border rounded-xl cursor-pointer transition-all ${
+                          selectedSource === source.value ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] hover:border-blue-300 bg-white'
+                        }`}>
+                          <input type="radio" name="source" value={source.value} checked={selectedSource === source.value}
+                            onChange={(e) => setSelectedSource(e.target.value)} className="sr-only" />
+                          <span className={`w-3 h-3 rounded-full flex-shrink-0 ${
+                            selectedSource === source.value ? 'bg-blue-500' : 'bg-[#CBD5E1]'
+                          }`}></span>
+                          <span className="text-sm font-medium text-[#415168]">{source.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 文件上传 */}
+                  <div>
+                    <label className="block text-sm font-semibold text-[#415168] mb-3">上传数据文件 <span className="text-red-500">*</span></label>
+                    <div 
+                      className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${
+                        isDragOver ? 'border-blue-400 bg-blue-50' :
+                        dataFile ? 'border-green-400 bg-green-50' : 'border-[#CBD5E1] hover:border-blue-400 hover:bg-blue-50'
+                      }`}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {dataFile ? (
+                        <div className="flex items-center justify-center gap-3">
+                          <FileText className="w-10 h-10 text-green-500" />
+                          <div className="text-left">
+                            <p className="font-semibold text-[#162033]">{dataFile.name}</p>
+                            <p className="text-sm text-[#64748B]">{(dataFile.size / 1024).toFixed(1)} KB</p>
+                          </div>
+                          <button onClick={(e) => { e.stopPropagation(); setDataFile(null); setImportedData([]); }} className="ml-4 p-1 hover:bg-green-100 rounded-lg">
+                            <X className="w-4 h-4 text-green-600" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <Upload className="w-12 h-12 text-[#2F6BFF] mx-auto mb-3" />
+                          <p className="text-[#415168] font-medium mb-1">拖拽文件到此处 或 点击选择文件</p>
+                          <p className="text-xs text-[#A89B8E]">支持格式：.csv / .txt / .xlsx，不超过 20M</p>
+                        </>
+                      )}
+                      <input 
+                        ref={fileInputRef}
+                        type="file" 
+                        className="hidden" 
+                        accept=".csv,.txt,.xlsx" 
+                        onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])} 
+                      />
+                    </div>
+                  </div>
+
+                  {/* 上传进度 */}
+                  {isUploading && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-[#415168]">正在上传...</span>
+                        <span className="text-sm font-medium text-blue-500">{uploadProgress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 错误提示 */}
+                  {uploadError && (
+                    <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl">
+                      <p className="text-sm text-red-600 flex items-center gap-2">
+                        <XCircle className="w-4 h-4" />
+                        {uploadError}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {currentStep === 2 && (
+              <div className="space-y-5">
+                <div className="bg-white rounded-2xl p-5 border border-[#E2E8F0] shadow-sm">
+                  <h4 className="text-base font-bold text-[#162033] flex items-center gap-2 mb-4">
+                    <Activity className="w-5 h-5 text-[#2F6BFF]" />
+                    步骤 2：检查数据
+                  </h4>
+                  <p className="text-sm text-[#64748B] mb-4">上传完毕后自动解析并展示统计信息与逐条数据，请仔细检查并筛选。</p>
+
+                  {/* 统计信息 */}
+                  <div className="bg-gradient-to-r from-[#F7FAFD] to-[#F3F8FF] rounded-xl p-4 mb-5 border border-[#DCE7F5]">
+                    <h5 className="font-semibold text-sm text-[#162033] mb-3 flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-[#2F6BFF]" />
+                      数据集统计信息
+                    </h5>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white rounded-lg p-3 border border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B]">数据来源</p>
+                        <p className="font-bold text-[#162033]">{dataSourceLabels[selectedSource] || '-'}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B]">用户数 <span className="text-green-500 text-[10px]">(自动)</span></p>
+                        <p className="font-bold text-[#162033]">{uniqueUserCount}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B]">帖子数 <span className="text-green-500 text-[10px]">(自动)</span></p>
+                        <p className="font-bold text-[#162033]">{importedData.length}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B]">风险分布 <span className="text-green-500 text-[10px]">(自动)</span></p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {Object.entries(riskDistribution).map(([label, count]) => {
+                            const coarseLevel = getCoarseRiskLevel(label, selectedSource, coarseRiskMap);
+                            const colorClass = coarseLevel === 'high' ? 'text-red-600' : coarseLevel === 'medium' ? 'text-yellow-600' : 'text-green-600';
+                            return (
+                              <span key={label} className={`text-xs font-medium ${colorClass}`}>
+                                {label}: {count}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B]">细粒度风险等级 <span className="text-green-500 text-[10px]">(自动)</span></p>
+                        <p className="font-bold text-[#162033]">{fineRiskCount}分类</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B]">是否手工标注 <span className="text-[#2F6BFF] text-[10px]">(人工填写)</span></p>
+                        <label className="flex items-center gap-2 mt-1">
+                          <input 
+                            type="checkbox" 
+                            checked={isManualAnnotation}
+                            onChange={(e) => setIsManualAnnotation(e.target.checked)}
+                            className="w-4 h-4 rounded border-[#BFD3F2] text-[#2F6BFF]"
+                          />
+                          <span className="text-xs text-[#415168]">{isManualAnnotation ? '是' : '否'}</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 字段筛选区域 */}
+                  <div className="bg-white rounded-xl p-4 mb-5 border border-[#E2E8F0]">
+                    <h5 className="font-semibold text-sm text-[#162033] mb-3 flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-[#2F6BFF]" />
+                      字段筛选
+                    </h5>
+                    <p className="text-xs text-[#64748B] mb-3">按当前数据源模板显示字段。必填字段默认锁定，可选字段可手动隐藏。</p>
+                    <div className="flex flex-wrap gap-3">
+                      {availableFields.map(field => {
+                        const isRequired = !!selectedTemplate?.requiredColumns.some(col => col.name.toLowerCase() === field);
+                        const isChecked = selectedFields.includes(field);
+                        return (
+                          <label key={field} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all ${
+                            isRequired ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-70' :
+                            isChecked ? 'bg-[#F3F8FF] border-[#8FB4FF]' : 'bg-white border-[#E2E8F0] hover:border-[#8FB4FF]'
+                          }`}>
+                            <input 
+                              type="checkbox" 
+                              checked={isChecked}
+                              disabled={isRequired}
+                              onChange={() => {
+                                if (isRequired) return;
+                                setSelectedFields(prev => 
+                                  prev.includes(field) 
+                                    ? prev.filter(f => f !== field)
+                                    : [...prev, field]
+                                );
+                              }}
+                              className="w-4 h-4 rounded border-[#BFD3F2] text-[#2F6BFF]"
+                            />
+                            <span className="text-xs font-medium text-[#415168]">
+                              {FIELD_LABELS[field] || field}
+                            </span>
+                            {isRequired && <span className="text-[10px] text-gray-400">(必选)</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 数据检查表格 */}
+                  <div className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between p-3 bg-gradient-to-r from-[#F7FAFD] to-white border-b border-[#E2E8F0]">
+                      <h5 className="font-semibold text-sm text-[#162033]">数据检查列表 <span className="text-xs font-normal text-[#64748B]">（共 {userReviewRows.length} 位用户）</span></h5>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleAcceptAll}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-xs font-medium transition-colors">
+                          <CheckCircle className="w-3 h-3" /> 批量接受
+                        </button>
+                        <button
+                          onClick={handleRejectAll}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-medium transition-colors">
+                          <XCircle className="w-3 h-3" /> 批量拒绝
+                        </button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto max-h-72">
+                      <table className="w-full">
+                        <thead className="bg-[#F7FAFD] sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168] w-10">
+                              <input 
+                                type="checkbox"
+                                checked={userReviewRows.length > 0 && userReviewRows.every(row => selectedUserIds[row.userId])}
+                                onChange={toggleSelectAll}
+                                className="w-4 h-4 rounded border-[#BFD3F2] text-[#2F6BFF] cursor-pointer"
+                                title="全选/取消全选"
+                              />
+                            </th>
+                            {showUserField && <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">用户ID</th>}
+                            {showTimestampField && <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">时间戳</th>}
+                            {showPostField && <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">贴文内容</th>}
+                            {showEmojiField && <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">表情序列</th>}
+                            {showRiskField && <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">风险等级</th>}
+                            <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">检查状态</th>
+                            <th className="px-3 py-2.5 text-left text-xs font-semibold text-[#415168]">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#EAF0F6]">
+                          {userReviewRows.map((row) => {
+                            const rc = RISK_COLORS[row.riskLevel];
+                            const userStatus = userStatuses[row.userId] ?? 'pending';
+                            return (
+                              <tr key={row.userId} className="hover:bg-[#F7FAFD] transition-colors">
+                                <td className="px-3 py-2.5">
+                                  <input 
+                                    type="checkbox"
+                                    checked={!!selectedUserIds[row.userId]}
+                                    onChange={() => toggleRowSelected(row.userId)}
+                                    className="w-4 h-4 rounded border-[#BFD3F2] text-[#2F6BFF] cursor-pointer"
+                                    title="选中该行"
+                                  />
+                                </td>
+                                {showUserField && (
+                                  <td className="px-3 py-2.5 text-xs text-[#415168] font-mono align-top">{row.userId}</td>
+                                )}
+                                {showTimestampField && (
+                                  <td className="px-3 py-2.5 text-xs text-[#415168] align-top">
+                                    {row.timestamps.length > 0 ? (
+                                      <div className="space-y-1 max-w-[180px]">
+                                        {row.timestamps.slice(0, 3).map((timestamp, index) => (
+                                          <div key={`${row.userId}_timestamp_${index}`} className="truncate" title={timestamp}>
+                                            {timestamp}
+                                          </div>
+                                        ))}
+                                        {row.timestamps.length > 3 && (
+                                          <div className="text-[#94A3B8]">+{row.timestamps.length - 3} 条</div>
+                                        )}
+                                      </div>
+                                    ) : <span className="text-amber-500 italic">缺失</span>}
+                                  </td>
+                                )}
+                                {showPostField && (
+                                  <td className="px-3 py-2.5 text-xs text-[#415168] align-top">
+                                    {row.posts.length > 0 ? (
+                                      <div className="max-w-[360px] space-y-1">
+                                        {row.posts.map((post, index) => (
+                                          <div
+                                            key={post.id}
+                                            className="rounded-md bg-[#F8FAFC] px-2 py-1 leading-5 text-[#415168]"
+                                            title={post.content}
+                                          >
+                                            <span className="mr-2 text-[#94A3B8]">{index + 1}.</span>
+                                            {post.content || <span className="text-gray-300 italic">无内容</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : <span className="text-gray-300 italic">无内容</span>}
+                                  </td>
+                                )}
+                                {showEmojiField && (
+                                  <td className="px-3 py-2.5 text-xs text-[#415168] align-top">
+                                    {row.emojiPreview.length > 0 ? (
+                                      <div className="max-w-[180px] space-y-1">
+                                        {row.emojiPreview.slice(0, 3).map((emoji, index) => (
+                                          <div key={`${row.userId}_emoji_${index}`} className="truncate" title={emoji}>
+                                            {emoji}
+                                          </div>
+                                        ))}
+                                        {row.emojiPreview.length > 3 && (
+                                          <div className="text-[#94A3B8]">+{row.emojiPreview.length - 3} 条</div>
+                                        )}
+                                      </div>
+                                    ) : <span className="text-gray-300 italic">无</span>}
+                                  </td>
+                                )}
+                                {showRiskField && (
+                                  <td className="px-3 py-2.5 align-top">
+                                    <span className={`px-2 py-0.5 ${rc.bg} ${rc.text} text-xs rounded-full font-medium`}>
+                                      {getFineRiskLabel(row.suicideRisk ?? row.riskLevel, selectedSource, fineRiskLabels)}
+                                    </span>
+                                  </td>
+                                )}
+                                <td className="px-3 py-2.5 align-top">
+                                  <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                                    userStatus === 'accepted' ? 'bg-green-100 text-green-700' :
+                                    userStatus === 'rejected' ? 'bg-red-100 text-red-700' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {userStatus === 'accepted' ? '已接受' :
+                                     userStatus === 'rejected' ? '已拒绝' : '待处理'}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 align-top">
+                                  <div className="flex items-center gap-1">
+                                    <button 
+                                      onClick={() => setUserStatuses(prev => ({ ...prev, [row.userId]: 'accepted' }))}
+                                      className={`px-2 py-1 text-xs rounded-lg transition-colors ${
+                                        userStatus === 'accepted' 
+                                          ? 'bg-green-500 text-white' 
+                                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                      }`}>
+                                      接受
+                                    </button>
+                                    <button 
+                                      onClick={() => setUserStatuses(prev => ({ ...prev, [row.userId]: 'rejected' }))}
+                                      className={`px-2 py-1 text-xs rounded-lg transition-colors ${
+                                        userStatus === 'rejected' 
+                                          ? 'bg-red-500 text-white' 
+                                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                      }`}>
+                                      拒绝
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentStep === 3 && (
+              <div className="flex flex-col items-center justify-center h-full py-12">
+                <div className="w-24 h-24 bg-gradient-to-br from-green-100 to-green-200 rounded-full flex items-center justify-center mb-6 shadow-lg">
+                  <CheckCircle className="w-14 h-14 text-green-500" />
+                </div>
+                <h4 className="text-2xl font-bold text-[#162033] mb-3">导入完成！</h4>
+                <p className="text-[#64748B] mb-2 text-center">
+                  已成功导入 <span className="font-bold text-green-600">{userReviewRows.filter(row => userStatuses[row.userId] === 'accepted').length}</span> 位用户
+                </p>
+                <p className="text-sm text-[#94A3B8] mb-6">档案已进入心理档案室列表</p>
+                
+                <div className="bg-white rounded-2xl p-5 border border-[#E2E8F0] shadow-sm w-full max-w-sm">
+                  <h5 className="font-semibold text-sm text-[#162033] mb-3">导入摘要</h5>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center py-2 border-b border-[#EAF0F6]">
+                      <span className="text-sm text-[#64748B]">数据来源</span>
+                      <span className="text-sm font-medium text-[#162033]">{dataSourceLabels[selectedSource]}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-[#EAF0F6]">
+                      <span className="text-sm text-[#64748B]">接受记录</span>
+                      <span className="text-sm font-medium text-green-600">{userReviewRows.filter(row => userStatuses[row.userId] === 'accepted').length} 位用户</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 border-b border-[#EAF0F6]">
+                      <span className="text-sm text-[#64748B]">拒绝记录</span>
+                      <span className="text-sm font-medium text-red-600">{userReviewRows.filter(row => userStatuses[row.userId] === 'rejected').length} 位用户</span>
+                    </div>
+                    <div className="flex justify-between items-center py-2">
+                      <span className="text-sm text-[#64748B]">导入时间</span>
+                      <span className="text-sm font-medium text-[#162033]">{formatDateTime(new Date().toISOString())}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 底部按钮 */}
+        <div className="flex justify-between items-center p-5 bg-white border-t border-[#E2E8F0]">
+          <ActionCapsuleButton onClick={() => currentStep > 1 && setCurrentStep(s => s - 1)}
+            disabled={currentStep === 1}
+            variant="neutral"
+            size="lg"
+            icon={<ChevronLeft className="w-4 h-4" />}>
+            上一步
+          </ActionCapsuleButton>
+          <div className="flex items-center gap-3">
+            <ActionCapsuleButton onClick={onClose} variant="neutral" size="lg">
+              取消
+            </ActionCapsuleButton>
+            <ActionCapsuleButton onClick={() => {
+              if (currentStep === 1) {
+                if (selectedSource && dataFile) handleImport();
+              } else if (currentStep === 2) {
+                handleConfirmImport();
+              } else {
+                handleComplete();
+              }
+            }}
+              disabled={(currentStep === 1 && (!selectedSource || !dataFile || isUploading)) || (currentStep === 2 && isConfirming)}
+              variant="solid"
+              size="lg"
+              icon={currentStep === 1 ? (
+                isUploading ? <Activity className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />
+              ) : currentStep === 3 ? (
+                <Check className="w-4 h-4" />
+              ) : isConfirming ? (
+                <Activity className="w-4 h-4 animate-spin" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+            >
+              {currentStep === 1 ? (
+                isUploading ? '上传中...' : '下一步'
+              ) : currentStep === 3 ? (
+                '完成'
+              ) : isConfirming ? (
+                '确认中...'
+              ) : (
+                '下一步'
+              )}
+            </ActionCapsuleButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== 主页面组件 ====================
+
+export default function ArchivePage() {
+  const navigate = useNavigate();
+  const [filters, setFilters] = useState({ keyword: '', dataSource: '', status: '' });
+  const [appliedFilters, setAppliedFilters] = useState({ keyword: '', dataSource: '', status: '' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [isBatchPanelOpen, setIsBatchPanelOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // 动态数据源配置（从 API 加载）
+  const [dataSourceOptions, setDataSourceOptions] = useState<{ value: string; label: string }[]>(DATA_SOURCES);
+  const [dataSourceLabels, setDataSourceLabels] = useState<Record<string, string>>({ ...DATA_SOURCE_LABELS });
+  const [dataSourceColors, setDataSourceColors] = useState<Record<string, string>>({ ...DATA_SOURCE_COLORS });
+  // 动态细粒度/粗粒度风险映射（从 API 的 fineLabels / coarseRiskMapping 加载，覆盖静态默认值）
+  const [fineRiskLabels, setFineRiskLabels] = useState<Record<string, Record<number, string>>>({ ...FINE_RISK_LABELS });
+  const [coarseRiskMap, setCoarseRiskMap] = useState<Record<string, Record<number, 'low' | 'medium' | 'high'>>>({ ...COARSE_RISK_MAP });
+  const [archiveTemplates, setArchiveTemplates] = useState<Record<string, ArchiveTemplateMeta>>({});
+
+  // 演示档案列表（从 demo_archives 表加载，替代静态 mockArchives）
+  const [archives, setArchives] = useState<ArchiveRecord[]>([]);
+  const [archiveTotal, setArchiveTotal] = useState(0);
+
+  const loadArchivePage = async (
+    page: number,
+    nextFilters = appliedFilters,
+    nextPageSize = pageSize,
+  ) => {
+    const result = await fetchArchives({
+      page,
+      limit: nextPageSize,
+      dataset: nextFilters.dataSource || undefined,
+      keyword: nextFilters.keyword || undefined,
+      status: nextFilters.status || undefined,
+    });
+    setArchives(result.archives as ArchiveRecord[]);
+    setArchiveTotal(result.total);
+  };
+
+  // 预留函数，后续可能用到
+
+  // 首页统计（用于风险分布，与首页保持口径一致）
+  const [homeStats, setHomeStats] = useState<{
+    totalArchives: number;
+    totalPosts: number;
+    riskDistribution: {
+      low: { count: number; percentage: number };
+      medium: { count: number; percentage: number };
+      high: { count: number; percentage: number };
+    };
+  } | null>(null);
+
+  // 导入完成后刷新列表
+  const handleImportComplete = async () => {
+    try {
+      await loadArchivePage(currentPage, appliedFilters, pageSize);
+      const stats = await fetchHomeStats(true);
+      setHomeStats({
+        totalArchives: stats.totalArchives ?? stats.totalUsers ?? 0,
+        totalPosts: stats.totalPosts ?? 0,
+        riskDistribution: stats.riskDistribution ?? { low: { count: 0, percentage: 0 }, medium: { count: 0, percentage: 0 }, high: { count: 0, percentage: 0 } },
+      });
+    } catch (err) {
+      console.warn('刷新数据失败:', err);
+    }
+  };
+
+  // 初始化：加载数据集配置和演示档案
+  useEffect(() => {
+    const loadDatasetConfig = async () => {
+      try {
+        const [datasets, templateResp] = await Promise.all([
+          fetchDatasets(),
+          fetchArchiveTemplates().catch(() => ({ sources: {} })),
+        ]);
+        setArchiveTemplates(templateResp.sources || {});
+        if (datasets && datasets.length > 0) {
+          // 仅保留内置四个系列，避免历史测试数据污染导入来源选择
+          const builtinDatasets = datasets.filter((ds: DatasetProfile) => ds.isBuiltin);
+          if (builtinDatasets.length === 0) return;
+
+          const allDatasetOptions = builtinDatasets.map((ds: DatasetProfile) => ({
+            value: ds.datasetKey,
+            label: ds.displayName,
+          }));
+          
+          setDataSourceOptions([
+            { value: '', label: '全部数据源' },
+            ...allDatasetOptions,
+          ]);
+          
+          const labels: Record<string, string> = {};
+          const colors: Record<string, string> = {};
+          const dynamicFine: Record<string, Record<number, string>> = {};
+          const dynamicCoarse: Record<string, Record<number, 'low' | 'medium' | 'high'>> = {};
+          datasets.forEach((ds: DatasetProfile) => {
+            labels[ds.datasetKey] = ds.displayName;
+            colors[ds.datasetKey] = ds.color || 'bg-[#E8F0FF] text-[#2F6BFF]';
+            if (ds.fineLabels) {
+              const parsedFine: Record<number, string> = {};
+              Object.entries(ds.fineLabels).forEach(([k, v]) => {
+                parsedFine[Number(k)] = v as string;
+              });
+              dynamicFine[ds.datasetKey] = parsedFine;
+            }
+            if (ds.coarseRiskMapping) {
+              dynamicCoarse[ds.datasetKey] = ds.coarseRiskMapping as Record<number, 'low' | 'medium' | 'high'>;
+            }
+          });
+          setDataSourceLabels(labels);
+          setDataSourceColors(colors);
+          if (Object.keys(dynamicFine).length > 0) setFineRiskLabels(prev => ({ ...prev, ...dynamicFine }));
+          if (Object.keys(dynamicCoarse).length > 0) setCoarseRiskMap(prev => ({ ...prev, ...dynamicCoarse }));
+        }
+      } catch (err) {
+        console.warn('加载数据集配置失败，使用默认值:', err);
+      }
+    };
+
+    const loadHomeStats = async () => {
+      try {
+        const stats = await fetchHomeStats(true);
+        setHomeStats({
+          totalArchives: stats.totalArchives ?? stats.totalUsers ?? 0,
+          totalPosts: stats.totalPosts ?? 0,
+          riskDistribution: stats.riskDistribution ?? { low: { count: 0, percentage: 0 }, medium: { count: 0, percentage: 0 }, high: { count: 0, percentage: 0 } },
+        });
+      } catch (err) {
+        console.warn('加载首页统计失败:', err);
+      }
+    };
+
+    loadDatasetConfig();
+    loadHomeStats();
+  }, []);
+
+  // 分页/筛选变化时重新加载档案
+  useEffect(() => {
+    const loadArchives = async () => {
+      try {
+        await loadArchivePage(currentPage, appliedFilters, pageSize);
+      } catch (err) {
+        console.warn('加载档案失败:', err);
+      }
+    };
+    loadArchives();
+  }, [currentPage, pageSize, appliedFilters]);
+
+  // 筛选并重新加载档案
+  const handleFilterAndReload = () => {
+    setAppliedFilters({ ...filters });
+    setCurrentPage(1);
+  };
+
+  const handleKeywordKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleFilterAndReload();
+    }
+  };
+
+  const handleReset = () => {
+    setFilters({ keyword: '', dataSource: '', status: '' });
+    setAppliedFilters({ keyword: '', dataSource: '', status: '' });
+    setCurrentPage(1);
+  };
+
+  const totalPages = Math.ceil(archiveTotal / pageSize);
+  const safeTotalPages = Math.max(1, totalPages || 0);
+  const paginatedArchives = archives;
+
+  // 统计概览数据（优先取首页口径，确保与分页显示一致）
+  // 档案总数：使用首页统计的总数，而非过滤后的数量
+  const totalUsers = homeStats?.totalArchives ?? archiveTotal;
+  const totalPosts = homeStats?.totalPosts ?? 0;
+  const highRiskCount = homeStats?.riskDistribution.high.count ?? 0;
+  const lowRiskCount = homeStats?.riskDistribution.low.count ?? 0;
+  const archiveStatCards = [
+    { label: '档案总数', value: totalUsers, note: '已纳入样本库并支持后续问答与检测联动的用户档案数量', icon: FileStack, tone: 'blue' as const },
+    { label: '帖子总数', value: totalPosts, note: '覆盖档案用户全部贴文记录与时间序列行为数据', icon: FileText, tone: 'slate' as const },
+    { label: '低风险档案', value: lowRiskCount, note: '当前整体风险水平较低、可常规跟踪的档案数量', icon: CheckCircle, tone: 'green' as const },
+    { label: '高风险档案', value: highRiskCount, note: '需优先复核、转介和持续监测的高风险档案数量', icon: AlertTriangle, tone: 'red' as const },
+  ];
+
+  const refreshArchiveData = async (targetPage = currentPage) => {
+    const normalizedPage = Math.min(Math.max(targetPage, 1), Math.max(1, Math.ceil(Math.max(archiveTotal - 1, 0) / pageSize)));
+    await loadArchivePage(normalizedPage, appliedFilters, pageSize);
+    const stats = await fetchHomeStats(true);
+    setHomeStats({
+      totalArchives: stats.totalArchives ?? stats.totalUsers ?? 0,
+      totalPosts: stats.totalPosts ?? 0,
+      riskDistribution: stats.riskDistribution ?? { low: { count: 0, percentage: 0 }, medium: { count: 0, percentage: 0 }, high: { count: 0, percentage: 0 } },
+    });
+    if (normalizedPage !== currentPage) {
+      setCurrentPage(normalizedPage);
+    }
+  };
+
+  const handleDeleteArchive = async (archive: ArchiveRecord) => {
+    const confirmed = window.confirm(`确定要删除档案「${archive.userId}」吗？此操作不可恢复。`);
+    if (!confirmed || isDeleting) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteArchive(archive.userId);
+      setSelectedArchives((prev) => {
+        const next = new Set(prev);
+        next.delete(archive.id);
+        return next;
+      });
+      const nextTotal = Math.max(archiveTotal - 1, 0);
+      const nextPage = Math.min(currentPage, Math.max(1, Math.ceil(nextTotal / pageSize)));
+      await refreshArchiveData(nextPage);
+    } catch (error) {
+      console.error('删除档案失败:', error);
+      window.alert('删除失败，请稍后重试。');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedArchives.size === 0 || isDeleting) return;
+    const confirmed = window.confirm(`确定要删除选中的 ${selectedArchives.size} 条档案吗？此操作不可恢复。`);
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      const selectedUserIds = paginatedArchives
+        .filter((archive) => selectedArchives.has(archive.id))
+        .map((archive) => archive.userId);
+      await deleteArchives(selectedUserIds);
+      setSelectedArchives(new Set());
+      setIsBatchMode(false);
+      setIsBatchPanelOpen(false);
+      const nextTotal = Math.max(archiveTotal - selectedUserIds.length, 0);
+      const nextPage = Math.min(currentPage, Math.max(1, Math.ceil(nextTotal / pageSize)));
+      await refreshArchiveData(nextPage);
+    } catch (error) {
+      console.error('批量删除档案失败:', error);
+      window.alert('批量删除失败，请稍后重试。');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handlePrevPage = () => {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(safeTotalPages, prev + 1));
+  };
+
+  const handleLastPage = () => {
+    setCurrentPage(safeTotalPages);
+  };
+
+  return (
+    <div className="flex flex-1 flex-col min-h-0 w-full gap-4 md:gap-5 animate-fade-in">
+      <div className="grid grid-cols-1 gap-3 shrink-0 md:grid-cols-2 xl:grid-cols-4">
+        {archiveStatCards.map((card) => (
+          <PaperStatCard key={card.label} label={card.label} value={card.value} note={card.note} icon={card.icon} tone={card.tone} />
+        ))}
+      </div>
+
+      <div className="shrink-0 bg-white rounded-[28px] p-5 shadow-[0_10px_28px_rgba(15,23,42,0.04)] border border-[#E2E8F0]">
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="text-sm font-medium text-[#334155]">快捷操作：</span>
+          <ActionCapsuleButton
+            onClick={() => setIsImportModalOpen(true)}
+            variant="solid"
+            icon={<Plus className="w-4 h-4" />}
+          >
+            导入数据
+          </ActionCapsuleButton>
+          <ActionCapsuleButton
+            onClick={() => { setIsBatchMode(true); setIsBatchPanelOpen(true); }}
+            variant="neutral"
+            icon={<Layers className="w-4 h-4" />}
+          >
+            批量管理
+          </ActionCapsuleButton>
+        </div>
+      </div>
+
+      <div className="shrink-0 bg-white rounded-[28px] p-5 shadow-[0_10px_28px_rgba(15,23,42,0.04)] border border-[#E2E8F0]">
+        <div className="flex flex-wrap gap-4">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-[#415168]">关键词：</label>
+            <input type="text" placeholder="输入用户ID关键词"
+              className="px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 text-sm w-40 bg-[#F7F9FC]"
+              value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} onKeyDown={handleKeywordKeyDown} />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-[#415168]">数据来源：</label>
+            <select className="px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 text-sm bg-[#F7F9FC]"
+              value={filters.dataSource} onChange={(e) => setFilters({ ...filters, dataSource: e.target.value })}>
+              {dataSourceOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-[#415168]">状态：</label>
+            <select className="px-3 py-2 border border-[#E2E8F0] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 text-sm bg-[#F7F9FC]"
+              value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+              <option value="">全部状态</option>
+              <option value="ready">已就绪</option>
+              <option value="importing">导入中</option>
+              <option value="analyzing">分析中</option>
+            </select>
+          </div>
+          <ActionCapsuleButton onClick={handleFilterAndReload} variant="solid" icon={<Search className="w-4 h-4" />}>
+            筛选
+          </ActionCapsuleButton>
+          <ActionCapsuleButton onClick={handleReset} variant="neutral" icon={<RefreshCw className="w-4 h-4" />}>
+            重置
+          </ActionCapsuleButton>
+          
+          {/* 已应用筛选条件提示 */}
+          {appliedFilters.keyword || appliedFilters.dataSource || appliedFilters.status ? (
+            <div className="flex items-center gap-2 text-sm text-[#64748B] ml-auto">
+              <Filter className="w-4 h-4" />
+              <span>当前筛选：</span>
+              {appliedFilters.keyword && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">关键词: {appliedFilters.keyword}</span>}
+              {appliedFilters.dataSource && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">{dataSourceLabels[appliedFilters.dataSource]}</span>}
+              {appliedFilters.status && <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">{appliedFilters.status === 'ready' ? '已就绪' : appliedFilters.status === 'importing' ? '导入中' : '分析中'}</span>}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* 档案列表 */}
+      <div className="flex-1 min-h-0 bg-white rounded-[28px] shadow-[0_10px_28px_rgba(15,23,42,0.04)] border border-[#E2E8F0] overflow-hidden flex flex-col">
+        <div className="overflow-x-auto flex-1 min-h-0">
+          <table className="w-full">
+            <thead className="bg-gradient-to-r from-[#F7FAFD] to-white sticky top-0 z-10">
+              <tr>
+                {isBatchMode && (
+                  <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155] w-12">
+                    <input
+                      type="checkbox"
+                      checked={paginatedArchives.length > 0 && paginatedArchives.every(a => selectedArchives.has(a.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedArchives(prev => {
+                            const newSet = new Set(prev);
+                            paginatedArchives.forEach(a => newSet.add(a.id));
+                            return newSet;
+                          });
+                        } else {
+                          setSelectedArchives(prev => {
+                            const newSet = new Set(prev);
+                            paginatedArchives.forEach(a => newSet.delete(a.id));
+                            return newSet;
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 rounded border-[#CBD5E1] text-blue-500 cursor-pointer"
+                    />
+                  </th>
+                )}
+                <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155]">用户ID</th>
+                <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155]">数据来源</th>
+                <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155]">贴文数</th>
+                <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155]">风险等级</th>
+                <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155]">导入时间</th>
+                <th className="px-4 py-3.5 text-left text-sm font-semibold text-[#334155]">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EAF0F6]">
+              {paginatedArchives.map((archive) => {
+                const riskKey = archive.riskOverview === '高风险' ? 'high' : archive.riskOverview === '中风险' ? 'medium' : 'low';
+                const isSelected = selectedArchives.has(archive.id);
+                return (
+                  <tr key={archive.id} className={`hover:bg-[#F7F9FC] transition-colors ${isSelected ? 'bg-blue-50' : ''}`}>
+                    {isBatchMode && (
+                      <td className="px-4 py-3.5">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            setSelectedArchives(prev => {
+                              const newSet = new Set(prev);
+                              if (newSet.has(archive.id)) {
+                                newSet.delete(archive.id);
+                              } else {
+                                newSet.add(archive.id);
+                              }
+                              return newSet;
+                            });
+                          }}
+                          className="w-4 h-4 rounded border-[#CBD5E1] text-blue-500 cursor-pointer"
+                        />
+                      </td>
+                    )}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center">
+                          <User className="w-5 h-5 text-blue-500" />
+                        </div>
+                        <span className="text-sm font-medium text-[#162033]">{archive.userId}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={`px-3 py-1 ${dataSourceColors[archive.dataSource] || 'bg-gray-100 text-gray-700'} text-xs rounded-full font-medium`}>
+                        {dataSourceLabels[archive.dataSource] || archive.dataSource}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-[#94A3B8]" />
+                        <span className="text-sm text-[#415168]">{archive.postCount}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full ${riskKey === 'high' ? 'bg-red-500' : riskKey === 'medium' ? 'bg-yellow-500' : 'bg-green-500'}`}></span>
+                        <span className={`px-3 py-1 ${RISK_COLORS[riskKey].bg} ${RISK_COLORS[riskKey].text} text-xs rounded-full font-medium`}>
+                          {archive.riskOverview}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-1.5 text-sm text-[#64748B]">
+                        <Clock className="w-3.5 h-3.5" />
+                        {formatDateTime(archive.importTime)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <ActionCapsuleButton onClick={() => {
+                          sessionStorage.setItem('selectedArchive', JSON.stringify(archive));
+                          navigate(`/archive/detail/${archive.id}?dataset=${encodeURIComponent(archive.dataSource)}`);
+                        }} tone="blue" tableAction icon={<Eye className="w-4 h-4" />}>
+                          查看
+                        </ActionCapsuleButton>
+                        <ActionCapsuleButton onClick={() => handleDeleteArchive(archive)} tone="red" tableAction icon={<Trash2 className="w-4 h-4" />}>
+                          删除
+                        </ActionCapsuleButton>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 批量操作面板 */}
+        {isBatchMode && isBatchPanelOpen && (
+          <div className="shrink-0 flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-50 to-[#F7FAFD] border-t border-[#DCE7F5]">
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-[#415168]">
+                已选择 <strong className="text-blue-600">{selectedArchives.size}</strong> 项
+              </span>
+              <button
+                onClick={() => { setSelectedArchives(new Set()); setIsBatchMode(false); setIsBatchPanelOpen(false); }}
+                className="text-sm text-[#64748B] hover:text-[#415168] transition-colors"
+              >
+                取消选择
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <ActionCapsuleButton
+                onClick={handleBatchDelete}
+                variant="solid"
+                tone="red"
+                icon={<Trash2 className="w-4 h-4" />}
+              >
+                批量删除
+              </ActionCapsuleButton>
+              <ActionCapsuleButton
+                onClick={() => { setIsBatchMode(false); setIsBatchPanelOpen(false); }}
+                variant="neutral"
+                icon={<X className="w-4 h-4" />}
+              >
+                关闭
+              </ActionCapsuleButton>
+            </div>
+          </div>
+        )}
+
+        {/* 分页 - 模仿农业文档风格 */}
+        <div className="relative z-20 shrink-0 flex items-center justify-between p-4 border-t border-[#E2E8F0] bg-gradient-to-r from-[#F7FAFD] to-white">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[#64748B]">每页显示：</span>
+            <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+              className="px-3 py-1.5 border border-[#E2E8F0] rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
+              <option value="10">10条</option>
+              <option value="20">20条</option>
+              <option value="50">50条</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[#64748B]">共 <strong className="text-[#162033]">{archiveTotal}</strong> 条，第 <strong className="text-[#162033]">{currentPage}</strong>/<strong className="text-[#162033]">{safeTotalPages}</strong> 页</span>
+            <div className="flex items-center gap-1 ml-2">
+              <button type="button" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}
+                className="p-2 hover:bg-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <ChevronLeft className="w-4 h-4 text-[#415168]" />
+              </button>
+              <button type="button" onClick={handlePrevPage} disabled={currentPage === 1}
+                className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-sm hover:bg-[#F1F5FA] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                上一页
+              </button>
+              <span className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm">
+                {currentPage}
+              </span>
+              <button type="button" onClick={handleNextPage} disabled={currentPage >= safeTotalPages}
+                className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-lg text-sm hover:bg-[#F1F5FA] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                下一页
+              </button>
+              <button type="button" onClick={handleLastPage} disabled={currentPage >= safeTotalPages}
+                className="p-2 hover:bg-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <ChevronRight className="w-4 h-4 text-[#415168]" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 弹窗 */}
+      <ImportWizardModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportComplete={handleImportComplete}
+        dataSourceOptions={dataSourceOptions}
+        dataSourceLabels={dataSourceLabels}
+        fineRiskLabels={fineRiskLabels}
+        coarseRiskMap={coarseRiskMap}
+        archiveTemplates={archiveTemplates}
+      />
+    </div>
+  );
+}
