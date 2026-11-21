@@ -18,6 +18,17 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler({org.springframework.web.multipart.support.MissingServletRequestPartException.class,
+            org.springframework.web.multipart.MaxUploadSizeExceededException.class})
+    public ResponseEntity<Map<String, Object>> handleUpload(Exception ex) {
+        return error(HttpStatus.BAD_REQUEST, "请上传完整的申请信息及符合大小要求的证明材料");
+    }
+
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleUnreadableBody(Exception ex) {
+        return error(HttpStatus.BAD_REQUEST, "请求格式错误，请检查内容及日期格式");
+    }
+
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Map<String, Object>> handleBusiness(BusinessException ex) {
         return error(ex.getStatus(), ex.getMessage());

@@ -1,0 +1,20 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const page=await browser.newPage();let sends=0;
+ await page.addInitScript(()=>localStorage.setItem('vis4srd-auth',JSON.stringify({state:{token:'fixture',isAuthenticated:true,user:{id:1,username:'fixture',role:'doctor'}},version:0})));
+ await page.route(/^http:\/\/127\.0\.0\.1:5173\/api\//,route=>{const p=new URL(route.request().url()).pathname;if(route.request().method()==='POST'&&p.includes('messages'))sends++;let data={};
+ if(p==='/api/auth/me')data={id:1,username:'fixture',role:'doctor'};
+ else if(p==='/api/knowledge/documents/demo')data={id:'demo',title:'合成知识资料',fileName:'demo.txt',format:'txt',fileSize:20,uploadStatus:'uploaded',createdAt:'2026-11-15T00:00:00Z'};
+ else if(p.endsWith('/preview'))data={content:'合成资料正文，仅供界面测试',format:'txt'};
+ else if(p==='/api/chat/sessions')data=route.request().method()==='POST'?{id:1,aiMode:'deep_think'}:{sessions:[],total:0};
+ return route.fulfill({json:{success:true,data}});});
+ await page.goto('http://127.0.0.1:5173/knowledge/detail?id=demo');await page.getByRole('heading',{name:'资料来源核查'}).waitFor();
+  assert.equal(await page.locator('main').getByRole('button',{name:/准备问题|进入辅助问答/}).count(),0);
+  const nav=page.getByRole('navigation',{name:'专业主导航'});
+  assert.match(await nav.getByRole('button',{name:'研究工作台'}).getAttribute('class'),/\bactive\b/);
+  await nav.getByRole('link',{name:'智能问答'}).click();await page.waitForURL('**/chat');
+  await page.goto('http://127.0.0.1:5173/chat/doc-preview?title=demo');
+  assert.equal(await nav.getByRole('link',{name:'智能问答'}).getAttribute('aria-current'),'page');
+  assert.equal(sends,0);
+  console.log('PASS: knowledge detail stays in research; chat citation preview stays in chat');
+ }finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

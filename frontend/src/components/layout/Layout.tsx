@@ -1,73 +1,39 @@
-import { useEffect, useState } from 'react'
-import Sidebar from './Sidebar'
-import TopBar from './TopBar'
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-
-const NAV_ITEMS = [
-  { id: 'home', label: '首页' },
-  { id: 'model', label: '模型中心' },
-  { id: 'knowledge', label: '知识库' },
-  { id: 'chat', label: '智能问答' },
-  { id: 'archive', label: '心理档案' },
-  { id: 'scale', label: '心理量表' },
-  { id: 'risk', label: '自杀风险检测' },
-  { id: 'map', label: '心理援助地图' },
-]
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Alert, Button, Spin } from 'antd';
+import ProfessionalLayout from './ProfessionalLayout';
+import { useAuthStore } from '../../store/authStore';
+import { canUseResearch } from '../../access';
+import { fetchMe } from '../../api';
+import './professional.css';
 
 export default function Layout() {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
-
+  const role = useAuthStore(s => s.user?.role);
+  const updateUser = useAuthStore(s => s.updateUser);
+  const clearSession = useAuthStore(s => s.logout);
+  const location = useLocation();
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
-    const syncSidebarForViewport = () => {
-      if (window.innerWidth < 768) {
-        setIsCollapsed(true)
-      }
-    }
-
-    syncSidebarForViewport()
-    window.addEventListener('resize', syncSidebarForViewport)
-    return () => window.removeEventListener('resize', syncSidebarForViewport)
-  }, [])
-  const isMapPage = location.pathname.includes('/map')
-  const isChatPage = location.pathname.includes('/chat')
-
-  const activeTab = NAV_ITEMS.find(item => location.pathname.includes(item.id))?.id || 'home'
-
-  const handleNavClick = (id: string) => {
-    navigate(`/${id}`)
-  }
-
-  return (
-    <div className="flex h-screen font-sans selection:bg-blue-100 bg-[#F5F7FB]">
-      <Sidebar
-        activeTab={activeTab}
-        onNavClick={handleNavClick}
-        isCollapsed={isCollapsed}
-        setIsCollapsed={setIsCollapsed}
-        isMapPage={isMapPage}
-        isChatPage={isChatPage}
-      />
-
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <TopBar
-          isCollapsed={isCollapsed}
-          setIsCollapsed={setIsCollapsed}
-        />
-
-        <main className={`flex flex-1 flex-col min-h-0 overflow-x-hidden custom-scrollbar relative ${
-          isMapPage
-            ? 'p-0 overflow-hidden'
-            : isChatPage
-              ? 'overflow-hidden py-4 pl-4 pr-3 md:py-5 md:pl-6 md:pr-4 lg:py-6 lg:pl-8 lg:pr-5'
-              : 'px-4 py-4 md:px-6 md:py-5 lg:px-8 lg:py-6 overflow-y-auto'
-        }`}>
-          <div className={`w-full ${isMapPage ? 'relative flex-1 min-h-0 h-full' : 'flex flex-1 flex-col min-h-0'}`}>
-            <Outlet />
-          </div>
-        </main>
-      </div>
-    </div>
-  )
+    let active = true;
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return;
+      fetchMe().then(user => {
+        if (active) { updateUser(user); setReady(true); setError(''); }
+      }).catch(e => { if (active) setError(e instanceof Error ? e.message : '无法读取账号角色'); });
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { active = false; window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [location.pathname, updateUser, retry]);
+  if (!ready) return <div className="p-8">{error ? <Alert type="error" message={error} action={<Button onClick={() => setRetry(v => v + 1)}>重试</Button>} /> : <Spin tip="正在读取账号权限"><div style={{height:100}} /></Spin>}</div>;
+  if (canUseResearch(role)) return <ProfessionalLayout />;
+  return <div className="p-8"><Alert type="warning" showIcon message="此账号没有专业工作台访问权限" description="个人账号请使用移动端。" action={<Button onClick={clearSession}>切换账号</Button>} /></div>;
 }
+
+
+
+
+

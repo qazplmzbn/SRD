@@ -6,3 +6,4 @@ pandas>=2.0.0
 # 按本机 CUDA 选择：https://pytorch.org/get-started/locally/
 torch>=2.0.0
 tqdm>=4.66.0
+transformers>=4.40,<5

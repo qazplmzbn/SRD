@@ -19,7 +19,7 @@ class DatasetControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void listDatasetsShouldReturnEnvelope() throws Exception {
         mockMvc.perform(get("/api/datasets"))
                 .andExpect(status().isOk())
@@ -28,7 +28,7 @@ class DatasetControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void templatesShouldBePublicOrAuth() throws Exception {
         mockMvc.perform(get("/api/upload/archive/templates"))
                 .andExpect(status().isOk())

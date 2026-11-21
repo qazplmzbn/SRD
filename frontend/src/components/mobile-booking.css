@@ -1,0 +1,21 @@
+.mobile-booking {padding:12px 0;color:#162033;overflow-wrap:anywhere;}
+.mobile-booking form {display:grid;grid-template-columns:minmax(0,1fr);gap:16px;background:white;padding:16px;border-radius:8px;}
+.mobile-booking .booking-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.mobile-booking h2,.mobile-booking h3,.mobile-booking p {margin:0;}
+.mobile-booking h2 {font-size:18px;flex-shrink:0;}
+.mobile-booking h3,.booking-field label {font-size:14px;font-weight:600;}
+.mobile-booking small {color:#596b83;font-size:12px;font-weight:400;}
+.booking-field {display:grid;gap:6px;min-width:0;}
+.booking-field .ant-select,.booking-field input[type=datetime-local] {width:100%;min-width:0;height:44px;box-sizing:border-box;}
+.booking-field input[type=datetime-local] {appearance:none;padding:0 12px;border:1px solid #dce3ef;border-radius:8px;background:white;color:inherit;font:inherit;}
+.booking-field input:focus-visible,.booking-share summary:focus-visible {outline:2px solid #2f6bff;outline-offset:2px;}
+.booking-share h3 {padding-bottom:6px;}
+.booking-share summary {cursor:pointer;min-height:44px;padding:12px 0;font-size:14px;border-bottom:1px solid #e2e8f0;}
+.booking-share details>div {padding:8px 4px;}
+.booking-share details[open]:not(:has(>div))::after {content:'暂无本机记录';display:block;padding:10px 0;font-size:13px;color:#596b83;}
+.mobile-booking form>.ant-checkbox-wrapper {align-items:baseline;font-size:13px;line-height:1.6;color:#475569;}
+.booking-history {padding:18px 4px 8px;}
+.mobile-booking .booking-empty,.booking-row {padding:16px;background:white;border-radius:8px;}
+.mobile-booking .booking-empty {text-align:center;color:#596b83;font-size:14px;}
+.booking-row+.booking-row {margin-top:8px;}
+.booking-row p {padding:6px 0;color:#596b83;font-size:13px;}

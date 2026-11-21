@@ -269,6 +269,7 @@ export default function KnowledgeDocDetailPage() {
 
   return (
     <div className="flex flex-1 flex-col min-h-0 w-full animate-fade-in">
+      <section className="pro-panel" style={{ marginBottom: 20 }}><h2>资料来源核查</h2><p className="pro-muted">目录文件：{doc.fileName || doc.title} · 文档编号：{String(doc.id)}</p><p className="pro-muted">当前目录未提供独立的原始出处、作者及出版日期字段，请在下方原文中核对。平台上传时间不能作为出版日期引用。</p></section>
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-[28px] border border-[#E2E8F0] bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
         <div className="border-b border-[#E8EEF6] bg-[#FCFDFF] px-5 py-4 lg:px-7">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

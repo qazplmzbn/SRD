@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Lock, Eye, EyeOff, Heart, ArrowRight, Loader2, Check } from 'lucide-react';
-import { register } from '../api';
+import { registerWeb } from '../api';
 import { useAuthStore } from '../store/authStore';
 
 export default function RegisterPage() {
@@ -41,7 +41,7 @@ export default function RegisterPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await register(username.trim(), password, nickname.trim() || undefined);
+      const res = await registerWeb(username.trim(), password, nickname.trim() || undefined);
       setAuth(res.user, res.token);
       navigate('/home', { replace: true });
     } catch (err: unknown) {
@@ -88,8 +88,8 @@ export default function RegisterPage() {
 
           <div className="px-8 py-8">
             <div className="mb-6">
-              <h2 className="text-xl font-bold text-gray-800">创建账户</h2>
-              <p className="text-gray-500 text-sm mt-1">注册即表示您同意我们的服务条款</p>
+              <h2 className="text-xl font-bold text-gray-800">注册专业账号</h2>
+              <p className="text-gray-500 text-sm mt-1">注册无需邀请码。医生身份请在登录后认证。</p>
             </div>
 
             <form onSubmit={handleRegister} className="space-y-4">

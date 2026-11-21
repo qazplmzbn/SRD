@@ -26,7 +26,7 @@ class ModelControllerTest {
     private ModelService modelService;
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void listModelsShouldReturnEnvelope() throws Exception {
         mockMvc.perform(get("/api/models"))
                 .andExpect(status().isOk())
@@ -35,7 +35,7 @@ class ModelControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void literalPathsShouldNotBeCapturedAsModelId() throws Exception {
         mockMvc.perform(get("/api/models/templates"))
                 .andExpect(status().isOk())
@@ -55,7 +55,7 @@ class ModelControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void ollamaStatusShouldNotThrowWhenUnreachable() throws Exception {
         mockMvc.perform(get("/api/models/ollama/status")
                         .param("base_url", "http://127.0.0.1:1"))
@@ -67,7 +67,7 @@ class ModelControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void compareAndHistoryShouldReturnEnvelope() throws Exception {
         mockMvc.perform(get("/api/models/compare"))
                 .andExpect(status().isOk())
@@ -103,7 +103,7 @@ class ModelControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void providersContentTypeIsJson() throws Exception {
         mockMvc.perform(get("/api/models/providers").accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())

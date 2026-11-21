@@ -17,7 +17,7 @@ import type {
 
 // 生产环境：通过 Nginx 代理使用相对路径（/api/*）
 // 开发环境：使用 .env 中的 VITE_API_BASE
-const API_BASE = (() => {
+export const API_BASE = (() => {
   const envValue = import.meta.env.VITE_API_BASE;
   // 如果环境变量为空字符串、undefined 或 "undefined"，使用相对路径（通过 Nginx 代理）
   if (!envValue || envValue === 'undefined' || envValue === '') {
@@ -50,13 +50,23 @@ export function getAuthHeader(): Record<string, string> {
   return {};
 }
 
-function handleUnauthorized(endpoint: string): void {
+async function handleUnauthorized(endpoint: string): Promise<void> {
   const isLoginOrRegister =
-    endpoint.includes('/api/auth/login') || endpoint.includes('/api/auth/register');
+    /^\/api\/auth\/(?:web\/)?(?:login|register)$/.test(endpoint);
   if (isLoginOrRegister || typeof window === 'undefined') {
     return;
   }
 
+  const authorization = getAuthHeader().Authorization;
+  if (endpoint.split('?')[0] !== '/api/auth/me') {
+    try {
+      const check = await fetch(`${API_BASE}/api/auth/me`, { headers: getAuthHeader(), cache: 'no-store' });
+      if (check.status !== 401) throw new Error(check.ok ? '当前登录仍有效，但此功能请求被拒绝，请稍后重试。' : '暂时无法核验登录状态，请稍后重试。');
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('无法连接服务，已保留登录状态。');
+    }
+  }
+  if (authorization !== getAuthHeader().Authorization) throw new Error('登录状态已更新，请重试当前操作。');
   try {
     localStorage.removeItem('vis4srd-auth');
   } catch {
@@ -69,7 +79,7 @@ function handleUnauthorized(endpoint: string): void {
   }
 }
 
-async function request<T>(
+export async function request<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
@@ -88,8 +98,12 @@ async function request<T>(
   });
 
   if (!response.ok) {
+    if (/^\/api\/auth\/web\/(?:register|login)$/.test(endpoint)) {
+      const details = await response.json().catch(() => null);
+      throw new Error(details?.message || details?.detail || `认证请求失败 (${response.status})`);
+    }
     if (response.status === 401) {
-      handleUnauthorized(endpoint);
+      await handleUnauthorized(endpoint);
       throw new Error('登录已过期，请重新登录');
     }
     throw new Error(`API 请求失败: ${response.status} ${response.statusText}`);
@@ -98,22 +112,13 @@ async function request<T>(
   // 确保响应文本按 UTF-8 解码
   const responseText = await response.text();
   
-  // 尝试解析 JSON，如果失败则返回原始文本
-  try {
-    const result: ApiResponse<T> & { error?: string } = JSON.parse(responseText);
-    if (!result.success) {
-      throw new Error(result.message || result.error || '请求失败');
-    }
-    // 如果 result.data 存在则返回它，否则返回整个 result（某些 API 直接返回数据）
-    return result.data !== undefined ? result.data : (result as unknown as T);
-  } catch {
-    // 如果不是标准 API 响应格式，直接返回解析后的数据
-    try {
-      return JSON.parse(responseText) as T;
-    } catch {
-      return responseText as unknown as T;
-    }
+  let result: ApiResponse<T>;
+  try { result = JSON.parse(responseText); }
+  catch { throw new Error('服务器返回了无效响应，请检查接口服务。'); }
+  if (result && typeof result === 'object' && result.success === false) {
+    throw new Error(result.message || '请求失败');
   }
+  return result && result.data !== undefined ? result.data : result as unknown as T;
 }
 
 // ==================== 首页 API ====================
@@ -165,8 +170,8 @@ export async function fetchHomeStats(forceRefresh = false): Promise<HomeStats> {
   }
 }
 
-export async function fetchHomeTrend(): Promise<HomeTrend[]> {
-  const endpoint = '/api/home/trend';
+export async function fetchHomeTrend(days = 30): Promise<HomeTrend[]> {
+  const endpoint = `/api/home/trend?days=${days}`;
   try {
     const data = await request<HomeTrend[]>(endpoint);
     return data;
@@ -1102,7 +1107,7 @@ export async function uploadKnowledgeDocument(
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized('/api/upload/knowledge');
+      await handleUnauthorized('/api/upload/knowledge');
       throw new Error('登录已过期，请重新登录');
     }
     const errorData = await response.json().catch(() => ({ message: '上传失败' }));
@@ -1138,7 +1143,7 @@ export async function fetchKnowledgeDocumentBlob(
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized(endpoint);
+      await handleUnauthorized(endpoint);
       throw new Error('登录已过期，请重新登录');
     }
     throw new Error(`文档加载失败: HTTP ${response.status}`);
@@ -1390,7 +1395,7 @@ export async function sendChatMessageStream(
 
   if (!resp.ok) {
     if (resp.status === 401) {
-      handleUnauthorized(endpoint);
+      await handleUnauthorized(endpoint);
       onError?.(new Error('登录已过期，请重新登录'));
       return;
     }
@@ -2473,7 +2478,7 @@ export async function uploadArchiveCSV(file: File, dataSource: string = 'reddit'
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized('/api/upload/archive');
+      await handleUnauthorized('/api/upload/archive');
       throw new Error('登录已过期，请重新登录');
     }
     const err = await response.json().catch(() => ({ detail: '上传失败' }));
@@ -2505,7 +2510,7 @@ export async function confirmArchiveImport(params: {
 
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized('/api/upload/archive/confirm');
+      await handleUnauthorized('/api/upload/archive/confirm');
       throw new Error('登录已过期，请重新登录');
     }
     const err = await response.json().catch(() => ({ detail: '确认导入失败' }));
@@ -2546,7 +2551,7 @@ export async function deleteUploadedDataset(filename: string): Promise<void> {
   });
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized('/api/upload/archive/datasets');
+      await handleUnauthorized('/api/upload/archive/datasets');
       throw new Error('登录已过期，请重新登录');
     }
     throw new Error(`删除失败: HTTP ${response.status}`);
@@ -2686,6 +2691,18 @@ export async function login(username: string, password: string) {
   );
 }
 
+export function loginWeb(username: string, password: string) {
+  return request<{ token: string; user: AuthUser }>('/api/auth/web/login', {
+    method: 'POST', body: JSON.stringify({ username, password }),
+  });
+}
+
+export function registerWeb(username: string, password: string, nickname?: string) {
+  return request<{ token: string; user: AuthUser }>('/api/auth/web/register', {
+    method: 'POST', body: JSON.stringify({ username, password, nickname }),
+  });
+}
+
 export async function register(username: string, password: string, nickname?: string) {
   return request<{ token: string; expires_at: string; jti: string; user: AuthUser }>(
     '/api/auth/register',
@@ -2723,3 +2740,5 @@ export async function updateProfile(nickname: string) {
     body: JSON.stringify({ nickname }),
   });
 }
+
+

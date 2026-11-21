@@ -7,6 +7,7 @@ import {
   FilterX, Info, Star, AlertTriangle, BookOpen, ChevronDown
 } from 'lucide-react';
 import { fetchArchiveDetail, fetchCSVPUserPosts, fetchCSVUserKeywords, fetchDatasets, DatasetProfile } from '../api';
+import { downloadResearchJson } from '../researchDownload';
 import ActionCapsuleButton from '../components/ActionCapsuleButton';
 
 // ==================== 类型定义 ====================
@@ -531,6 +532,8 @@ const chartUsesTimestamp = visiblePosts.some(post => hasUsableTimestamp(post));
             >
               返回列表
             </ActionCapsuleButton>
+            <ActionCapsuleButton onClick={() => downloadResearchJson(`${selectedArchive.dataSource}-${selectedArchive.userId}`, { dataset: selectedArchive.dataSource, subjectId: selectedArchive.userId, posts })} variant="neutral">下载档案 JSON</ActionCapsuleButton>
+            <ActionCapsuleButton onClick={() => navigate('/model-analysis', { state: { dataset: selectedArchive.dataSource, userHash: selectedArchive.userId, postCount: posts.length, riskLevel: riskKey } })} variant="neutral">用于风险检测</ActionCapsuleButton>
           </div>
 
           <div className="flex items-center gap-3">

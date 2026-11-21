@@ -9,18 +9,21 @@ function formatTrendDateLabel(value: string): string {
   return `${month}-${day}`;
 }
 
-export default function TrendChart() {
+export default function TrendChart({ days = 30 }: { days?: number }) {
   const [trendData, setTrendData] = useState<HomeTrend[]>([]);
 
   useEffect(() => {
-    fetchHomeTrend()
+    let active = true;
+    setTrendData([]);
+    fetchHomeTrend(days)
       .then((data) => {
-        if (data && data.length > 0) {
+        if (active && data && data.length > 0) {
           setTrendData(data);
         }
       })
       .catch(console.error);
-  }, []);
+    return () => { active = false; };
+  }, [days]);
 
   if (trendData.length === 0) {
     return (
@@ -214,3 +217,5 @@ export default function TrendChart() {
     </div>
   );
 }
+
+

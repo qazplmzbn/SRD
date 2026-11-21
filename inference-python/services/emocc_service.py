@@ -114,7 +114,8 @@ class GlobalSelfAttentionWithScores(nn.Module):
         if return_scores:
             # attn_weights: (B, T, T) - 每个帖子对所有帖子的注意力
             # 我们取对角线元素作为每个帖子自己的重要性权重
-            post_scores = torch.diagonal(attn_weights, dim1=1, dim2=2)  # (B, T)
+            queries = mask.to(attn_weights.dtype) if mask is not None else torch.ones_like(attn_weights[:, :, 0])
+            post_scores = (attn_weights * queries.unsqueeze(-1)).sum(1) / queries.sum(1, keepdim=True).clamp_min(1)
             return V_common, post_scores
         
         return V_common

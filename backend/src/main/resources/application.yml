@@ -70,3 +70,8 @@ logging:
   level:
     com.vis4srd: INFO
     org.springframework.security: WARN
+    # Do not log request/response bodies containing certification credentials.
+    org.springframework.web.servlet.mvc.method.annotation: INFO
+    org.springframework.http.converter: INFO
+    # Model requests can contain research text; suppress HTTP payload debug logs.
+    org.springframework.web.client: INFO

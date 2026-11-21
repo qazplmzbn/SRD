@@ -1069,11 +1069,10 @@ export default function ModelCenterPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const isTemplatePage = location.pathname.includes('/template');
-  const [activeTab, setActiveTab] = useState<'model' | 'template'>(isTemplatePage ? 'template' : 'model');
+  const activeTab = isTemplatePage ? 'template' : 'model';
 
   const handleTabChange = (tab: 'model' | 'template') => {
-    setActiveTab(tab);
-    navigate(tab === 'template' ? '/model/template' : '/model');
+    navigate(tab === 'template' ? '/model-config/template' : '/model-config');
   };
 
   // Modal 状态
@@ -1483,3 +1482,4 @@ export default function ModelCenterPage() {
     </div>
   );
 }
+

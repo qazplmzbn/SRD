@@ -20,7 +20,7 @@ class RiskControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void taskTypesShouldReturnStaticList() throws Exception {
         mockMvc.perform(get("/api/risk/task-types"))
                 .andExpect(status().isOk())
@@ -30,7 +30,7 @@ class RiskControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void modelsShouldReturnEmoccPlaceholder() throws Exception {
         mockMvc.perform(get("/api/risk/models"))
                 .andExpect(status().isOk())
@@ -39,7 +39,7 @@ class RiskControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void tasksListShouldSucceedWithoutPythonSidecar() throws Exception {
         mockMvc.perform(get("/api/risk/tasks"))
                 .andExpect(status().isOk())

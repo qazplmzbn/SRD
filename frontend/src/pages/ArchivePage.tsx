@@ -822,7 +822,7 @@ function ImportWizardModal({
               <Database className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-[#162033]">导入心理档案数据</h3>
+              <h3 className="text-lg font-bold text-[#162033]">导入研究档案数据</h3>
               <p className="text-xs text-[#64748B]">支持多数据源导入，自动识别风险级别</p>
             </div>
           </div>
@@ -1312,7 +1312,7 @@ function ImportWizardModal({
                 <p className="text-[#64748B] mb-2 text-center">
                   已成功导入 <span className="font-bold text-green-600">{userReviewRows.filter(row => userStatuses[row.userId] === 'accepted').length}</span> 位用户
                 </p>
-                <p className="text-sm text-[#94A3B8] mb-6">档案已进入心理档案室列表</p>
+                <p className="text-sm text-[#94A3B8] mb-6">档案已进入研究档案列表</p>
                 
                 <div className="bg-white rounded-2xl p-5 border border-[#E2E8F0] shadow-sm w-full max-w-sm">
                   <h5 className="font-semibold text-sm text-[#162033] mb-3">导入摘要</h5>
@@ -1394,10 +1394,10 @@ function ImportWizardModal({
 
 // ==================== 主页面组件 ====================
 
-export default function ArchivePage() {
+export default function ArchivePage({ dataset = '' }: { dataset?: string }) {
   const navigate = useNavigate();
-  const [filters, setFilters] = useState({ keyword: '', dataSource: '', status: '' });
-  const [appliedFilters, setAppliedFilters] = useState({ keyword: '', dataSource: '', status: '' });
+  const [filters, setFilters] = useState({ keyword: '', dataSource: dataset, status: '' });
+  const [appliedFilters, setAppliedFilters] = useState({ keyword: '', dataSource: dataset, status: '' });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -1929,3 +1929,4 @@ export default function ArchivePage() {
     </div>
   );
 }
+

@@ -1,0 +1,11 @@
+.care-selectors {display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+.care-selectors .ant-select {max-width:100%;}
+.care-identity {display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:20px;background:#eef4ff;border-top:2px solid #2f6bff;color:#162033;overflow-wrap:anywhere;}
+.care-initial {display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:white;color:#245acb;font-weight:650;font-size:20px;}
+.care-identity h2,.care-records h2 {margin:0;font-size:18px;font-weight:600;}
+.care-identity p,.care-identity dt {color:#516276;font-size:13px;margin:3px 0;}
+.care-identity dl {display:flex;flex-wrap:wrap;gap:12px 32px;margin:0 0 0 auto;}
+.care-identity dd {font-size:14px;margin:4px 0 0;}
+.care-records {margin-top:16px;padding:18px 20px;background:white;border-top:1px solid #e2e8f0;}
+.care-records .pro-review-item {padding:12px 0;}
+@media(max-width:640px){.care-identity dl{width:100%;margin:0;}.care-selectors .ant-select{flex:1 1 220px;}}

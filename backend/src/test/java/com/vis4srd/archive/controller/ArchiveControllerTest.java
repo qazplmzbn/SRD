@@ -19,7 +19,7 @@ class ArchiveControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void listUsersShouldReturnEnvelope() throws Exception {
         mockMvc.perform(get("/api/users"))
                 .andExpect(status().isOk())

@@ -143,3 +143,6 @@ docs/
 output/
 deploy/production/.env.production
 AGENTS.md
+
+frontend/.npm-cache/
+frontend/dist-mobile/

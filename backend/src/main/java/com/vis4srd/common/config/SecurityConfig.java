@@ -43,9 +43,17 @@ public class SecurityConfig {
                 }))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health", "/api/health/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/web/register", "/api/auth/web/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/scale/definitions", "/api/scale/definitions/**").permitAll()
-                        .requestMatchers("/uploads/**").permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/research/**").hasAnyRole("ADMIN", "RESEARCHER", "DOCTOR")
+                        .requestMatchers("/api/me/doctor-applications").hasAnyRole("RESEARCHER", "DOCTOR", "ADMIN")
+                        .requestMatchers("/api/models", "/api/models/**").hasRole("ADMIN")
+                        .requestMatchers("/api/home", "/api/home/**", "/api/users", "/api/users/**",
+                                "/api/datasets", "/api/datasets/**", "/api/risk", "/api/risk/**",
+                                "/api/upload/archive", "/api/upload/archive/**").hasAnyRole("ADMIN", "RESEARCHER", "DOCTOR")
+                        .requestMatchers("/uploads/archives/**").denyAll()
+                        .requestMatchers("/uploads/**").authenticated()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();

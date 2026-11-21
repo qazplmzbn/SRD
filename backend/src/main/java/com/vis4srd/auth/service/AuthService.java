@@ -8,6 +8,7 @@ import com.vis4srd.auth.mapper.AppUserMapper;
 import com.vis4srd.auth.mapper.TokenBlacklistMapper;
 import com.vis4srd.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -36,8 +37,18 @@ public class AuthService {
     private final TokenBlacklistMapper tokenBlacklistMapper;
     private final PasswordEncoder passwordEncoder;
 
+
     @Transactional
     public AppUser register(String username, String password, String nickname) {
+        return createAccount(username, password, nickname, "user");
+    }
+
+    @Transactional
+    public AppUser registerWeb(String username, String password, String nickname) {
+        return createAccount(username, password, nickname, "researcher");
+    }
+
+    private AppUser createAccount(String username, String password, String nickname, String role) {
         Long exists = appUserMapper.selectCount(
                 Wrappers.<AppUser>lambdaQuery().eq(AppUser::getUsername, username));
         if (exists != null && exists > 0) {
@@ -50,14 +61,14 @@ public class AuthService {
         user.setNickname(finalNickname);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setAvatarColor(AVATAR_COLORS[ThreadLocalRandom.current().nextInt(AVATAR_COLORS.length)]);
-        user.setRole("user");
+        user.setRole(role);
         user.setIsActive(true);
         appUserMapper.insert(user);
         return user;
     }
 
     @Transactional
-    public AppUser authenticate(String username, String password) {
+    public AppUser authenticate(String username, String password, boolean web) {
         AppUser user = appUserMapper.selectOne(
                 Wrappers.<AppUser>lambdaQuery().eq(AppUser::getUsername, username));
         if (user == null || Boolean.FALSE.equals(user.getIsActive())) {
@@ -66,13 +77,17 @@ public class AuthService {
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
         }
+        String role = user.getRole();
+        if (web ? role == null || !Set.of("researcher", "doctor", "admin").contains(role) : !"user".equals(role)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, web ? "请使用专业账号登录 Web 端" : "请使用个人账号登录移动端");
+        }
         user.setLastLoginAt(LocalDateTime.now());
         appUserMapper.updateById(user);
         return user;
     }
 
     public UserView getUserById(Long userId) {
-        AppUser user = appUserMapper.selectById(userId);
+        AppUser user = appUserMapper.selectCurrentIdentity(userId);
         if (user == null) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "用户不存在");
         }

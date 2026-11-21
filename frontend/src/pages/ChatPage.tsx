@@ -26,7 +26,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import { forceCollide } from 'd3-force';
 import {
@@ -1123,7 +1123,11 @@ export default function ChatPage() {
   const previousMessageCountRef = useRef(0);
   const [sessionItems, setSessionItems] = useState<SessionListItem[]>([]);
   const [messages, setMessages] = useState<MessageViewModel[]>([]);
-  const [inputText, setInputText] = useState('');
+  const knowledgeLocation = useLocation();
+  const [inputText, setInputText] = useState(() => {
+    const title = knowledgeLocation.state?.knowledgeTitle;
+    return typeof title === 'string' && title.trim() ? `请检索与《${title.slice(0, 300)}》相关的资料，说明主要内容和适用范围，并列出实际引用来源；如果未检索到该资料，请明确说明。` : '';
+  });
   const [currentChatMode, setCurrentChatMode] = useState<ChatSession['aiMode']>('deep_think');
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -1810,7 +1814,7 @@ export default function ChatPage() {
     if (snippet?.trim()) {
       params.set('snippet', snippet.trim());
     }
-    navigate(`/doc-preview?${params.toString()}`);
+    navigate(`/chat/doc-preview?${params.toString()}`);
   };
 
   const handleKnowledgeQuestion = (prompt: string) => {

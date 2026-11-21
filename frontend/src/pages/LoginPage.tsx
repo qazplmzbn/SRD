@@ -2,9 +2,10 @@
  * 登录页 — 白灰蓝科研风，和 VIS4SRD 研究平台保持一致
  */
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { User, Lock, Eye, EyeOff, Heart, ArrowRight, Loader2, Sparkles } from 'lucide-react';
-import { login } from '../api';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { User, Lock, Eye, EyeOff, Heart, ArrowRight, Loader2 } from 'lucide-react';
+import { canUseResearch } from '../access';
+import { loginWeb } from '../api';
 import { useAuthStore } from '../store/authStore';
 
 export default function LoginPage() {
@@ -30,7 +31,11 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await login(username.trim(), password);
+      const res = await loginWeb(username.trim(), password);
+      if (!canUseResearch(res.user.role)) {
+        setError('此账号没有专业工作台访问权限。个人账号请使用移动端。');
+        return;
+      }
       setAuth(res.user, res.token);
       navigate(nextPath, { replace: true });
     } catch (err: unknown) {
@@ -74,7 +79,7 @@ export default function LoginPage() {
           <div className="px-8 py-8">
             <div className="mb-6">
               <h2 className="text-xl font-bold text-gray-800">欢迎回来</h2>
-              <p className="text-gray-500 text-sm mt-1">请登录您的账户以继续使用</p>
+              <p className="text-gray-500 text-sm mt-1">请使用医生、研究者或平台管理员账号登录。</p>
             </div>
 
             {expiredNotice && (
@@ -156,22 +161,8 @@ export default function LoginPage() {
                 )}
               </button>
             </form>
+            <Link to="/register" className="mt-5 block text-center text-sm text-blue-700">注册专业账号</Link>
 
-            {/* 分隔线 */}
-            <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs text-gray-400">还没有账户？</span>
-              <div className="flex-1 h-px bg-gray-200" />
-            </div>
-
-            {/* 注册入口 */}
-            <button
-              onClick={() => navigate('/register')}
-              className="w-full py-2.5 border border-[#D6E4FA] text-[#385D9D] rounded-xl font-medium text-sm hover:bg-[#EEF5FF] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              立即注册
-            </button>
           </div>
         </div>
 

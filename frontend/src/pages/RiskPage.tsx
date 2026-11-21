@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Plus, RefreshCw, Eye, X, Check, AlertTriangle,
   FileText, ArrowLeft, Clock, Play,
@@ -245,14 +246,15 @@ interface CreateTaskModalProps {
   onClose: () => void;
   onCreated: (task: RiskTask) => void;
   dataSources: { value: string; label: string }[];
+  initialSelection?: { dataset: string; userHash: string; postCount: number; riskLevel: string };
 }
 
-function CreateTaskModal({ isOpen, onClose, onCreated, dataSources }: CreateTaskModalProps) {
+function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelection }: CreateTaskModalProps) {
   const modalBodyRef = useRef<HTMLDivElement | null>(null);
   const [modelCategory, setModelCategory] = useState<'api' | 'local_llm' | 'emocc'>('api');
   const [taskName, setTaskName] = useState('');
-  const [selectedSource, setSelectedSource] = useState('');
-  const [selectedUser, setSelectedUser] = useState<{ id: string; userHash: string; displayName: string; riskLevel: string; postCount: number } | null>(null);
+  const [selectedSource, setSelectedSource] = useState(initialSelection?.dataset ?? '');
+  const [selectedUser, setSelectedUser] = useState<{ id: string; userHash: string; displayName: string; riskLevel: string; postCount: number } | null>(() => initialSelection ? { ...initialSelection, id:`${initialSelection.dataset}:${initialSelection.userHash}`, displayName:initialSelection.userHash } : null);
   const [selectedApiModel, setSelectedApiModel] = useState<RiskPageApiModel | null>(null);
   const [selectedLlmModel, setSelectedLlmModel] = useState<RiskPageLlmModel | null>(null);
   const [selectedDetectionModel, setSelectedDetectionModel] = useState<RiskPageLocalModel | null>(null);
@@ -332,7 +334,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources }: CreateTask
           id: `${user.datasetSource || selectedSource}:${user.userId}`,
           userHash: user.userId,
           displayName: user.userId,
-          riskLevel: user.riskLevel || 'low',
+          riskLevel: user.riskLevel || 'unknown',
           postCount: Number(user.postCount || 0),
         })));
         setUsersTotal(result.total || 0);
@@ -988,9 +990,9 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources }: CreateTask
 function buildReportHtml(reportData: any): string {
   const rs = reportData.resultSummary || {};
   const emocc = rs.emoccModelResult;
-  const riskLevel = rs.riskLevel || 'medium';
-  const riskScore = rs.riskScore ?? 0.5;
-  const confidence = rs.confidence ?? 80;
+  const riskLevel = rs.riskLevel || 'unknown';
+  const riskScore = rs.riskScore;
+  const confidence = rs.confidence == null ? '未返回' : rs.confidence+'%';
 
   const riskColors: Record<string, string> = { low: '#22c55e', medium: '#f59e0b', high: '#ef4444' };
   const riskLabels: Record<string, string> = { low: '低风险', medium: '中风险', high: '高风险' };
@@ -1094,7 +1096,7 @@ function buildReportHtml(reportData: any): string {
 
   <div class="risk-level-box">
     <div class="level">${riskLabel}</div>
-    <div class="score">风险分数: ${riskScore.toFixed(2)} / 置信度: ${confidence}% / 调用模型: ${escapeHtml(rs.llmModel || rs.emotionalAnalysis ? (reportData.modelName || 'qwen-flash') : '')}</div>
+    <div class="score">风险分数: ${riskScore?.toFixed(2) ?? '未返回'} / 置信度: ${confidence} / 调用模型: ${escapeHtml(rs.llmModel || rs.emotionalAnalysis ? (reportData.modelName || 'qwen-flash') : '')}</div>
   </div>
 
   <div class="risk-banner">
@@ -1104,12 +1106,12 @@ function buildReportHtml(reportData: any): string {
     </div>
     <div class="risk-card">
       <div class="label">风险分数</div>
-      <div class="value">${riskScore.toFixed(2)}</div>
+      <div class="value">${riskScore?.toFixed(2) ?? '未返回'}</div>
       <div class="sub">${escapeHtml(scaleHint)}</div>
     </div>
     <div class="risk-card">
       <div class="label">置信度</div>
-      <div class="value">${confidence}%</div>
+      <div class="value">${confidence}</div>
     </div>
   </div>
 
@@ -1263,12 +1265,12 @@ function ResultPage({ task, onBack }: ResultPageProps) {
               </div>
               <div className="bg-gradient-to-br from-[#F7FAFD] to-[#F3F8FF] rounded-xl p-5 text-center border border-[#E2E8F0]">
                 <p className="text-sm text-[#64748B] mb-3">风险分数</p>
-                <p className="text-3xl font-bold text-[#162033]">{(result.riskScore ?? 0).toFixed(2)}</p>
+                <p className="text-3xl font-bold text-[#162033]">{result.riskScore?.toFixed(2) ?? '未返回'}</p>
                 <p className="text-xs text-[#94A3B8] mt-1">(0-1范围)</p>
               </div>
               <div className="bg-gradient-to-br from-[#F7FAFD] to-[#F3F8FF] rounded-xl p-5 text-center border border-[#E2E8F0]">
                 <p className="text-sm text-[#64748B] mb-3">置信度</p>
-                <p className="text-3xl font-bold text-[#162033]">{result.confidence}%</p>
+                <p className="text-3xl font-bold text-[#162033]">{result.confidence == null ? '未返回' : `${result.confidence}%`}</p>
               </div>
             </div>
 
@@ -1561,9 +1563,6 @@ function ResultPage({ task, onBack }: ResultPageProps) {
         >
           {isGeneratingReport ? '生成中...' : '生成报告'}
         </ActionCapsuleButton>
-        <ActionCapsuleButton onClick={() => window.location.href = '/map'} variant="neutral" size="lg" icon={<TrendingUp className="w-5 h-5" />}>
-          查看资源
-        </ActionCapsuleButton>
       </div>
     </div>
   );
@@ -1607,7 +1606,9 @@ export default function RiskPage() {
   // 状态
   const [viewMode, setViewMode] = useState<'list' | 'result'>('list');
   const [selectedTask, setSelectedTask] = useState<RiskTask | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const { state } = useLocation();
+  const initialSelection: CreateTaskModalProps['initialSelection'] = typeof state?.dataset === 'string' && typeof state?.userHash === 'string' ? state : undefined;
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(!!initialSelection);
   const [tasks, setTasks] = useState<RiskTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RiskTask | null>(null);
@@ -1658,9 +1659,9 @@ export default function RiskPage() {
             status: t.status as TaskStatus,
             progress: t.progress,
             resultSummary: t.resultSummary ? {
-              riskLevel: (t.resultSummary.riskLevel || 'medium') as 'low' | 'medium' | 'high',
-              riskScore: t.resultSummary.riskScore || 0.5,
-              confidence: t.resultSummary.confidence || 80,
+              riskLevel: (t.resultSummary.riskLevel || 'unknown') as 'low' | 'medium' | 'high',
+              riskScore: t.resultSummary.riskScore,
+              confidence: t.resultSummary.confidence,
               summary: t.resultSummary.summary || '',
               emoccModelResult: t.resultSummary.emoccModelResult,
               symptomDescription: t.resultSummary.symptomDescription,
@@ -1696,9 +1697,9 @@ export default function RiskPage() {
             status: t.status as TaskStatus,
             progress: t.progress || 0,
             resultSummary: t.resultSummary ? {
-              riskLevel: (t.resultSummary.riskLevel || 'medium') as 'low' | 'medium' | 'high',
-              riskScore: t.resultSummary.riskScore || 0.5,
-              confidence: t.resultSummary.confidence || 80,
+              riskLevel: (t.resultSummary.riskLevel || 'unknown') as 'low' | 'medium' | 'high',
+              riskScore: t.resultSummary.riskScore,
+              confidence: t.resultSummary.confidence,
               summary: t.resultSummary.summary || '',
               fealearnerModelResult: t.resultSummary.fealearnerModelResult,
               symptomDescription: t.resultSummary.symptomDescription,
@@ -1741,9 +1742,9 @@ export default function RiskPage() {
             status: t.status as TaskStatus,
             progress: t.progress || 0,
             resultSummary: t.resultSummary ? {
-              riskLevel: (t.resultSummary.riskLevel || 'medium') as 'low' | 'medium' | 'high',
-              riskScore: t.resultSummary.riskScore || 0.5,
-              confidence: t.resultSummary.confidence || 80,
+              riskLevel: (t.resultSummary.riskLevel || 'unknown') as 'low' | 'medium' | 'high',
+              riskScore: t.resultSummary.riskScore,
+              confidence: t.resultSummary.confidence,
               summary: t.resultSummary.summary || '',
               riskFactors: t.resultSummary.keyRiskFactors,
               protectiveFactors: t.resultSummary.protectiveFactors,
@@ -1851,9 +1852,9 @@ export default function RiskPage() {
             status: 'completed',
             progress: 100,
             resultSummary: result.resultSummary ? {
-              riskLevel: (result.resultSummary.riskLevel || 'medium') as 'low' | 'medium' | 'high',
-              riskScore: result.resultSummary.riskScore || 0.5,
-              confidence: result.resultSummary.confidence || 80,
+              riskLevel: (result.resultSummary.riskLevel || 'unknown') as 'low' | 'medium' | 'high',
+              riskScore: result.resultSummary.riskScore,
+              confidence: result.resultSummary.confidence,
               summary: result.resultSummary.summary || '检测完成',
               emoccModelResult: result.resultSummary.emoccModelResult,
               symptomDescription: result.resultSummary.symptomDescription,
@@ -1893,9 +1894,9 @@ export default function RiskPage() {
             postCount: result.postCount || t.postCount,
             modelName: result.modelName || t.modelName,
             resultSummary: result.resultSummary ? {
-              riskLevel: (result.resultSummary.riskLevel || 'medium') as 'low' | 'medium' | 'high',
-              riskScore: result.resultSummary.riskScore || 0.5,
-              confidence: result.resultSummary.confidence || 80,
+              riskLevel: (result.resultSummary.riskLevel || 'unknown') as 'low' | 'medium' | 'high',
+              riskScore: result.resultSummary.riskScore,
+              confidence: result.resultSummary.confidence,
               summary: result.resultSummary.summary || 'FeaLearner 检测完成',
               fealearnerModelResult: result.resultSummary.fealearnerModelResult,
               symptomDescription: result.resultSummary.symptomDescription,
@@ -1921,9 +1922,9 @@ export default function RiskPage() {
             status: 'completed',
             progress: 100,
             resultSummary: result.resultSummary ? {
-              riskLevel: (result.resultSummary.riskLevel || 'medium') as 'low' | 'medium' | 'high',
-              riskScore: result.resultSummary.riskScore || 0.5,
-              confidence: result.resultSummary.confidence || 80,
+              riskLevel: (result.resultSummary.riskLevel || 'unknown') as 'low' | 'medium' | 'high',
+              riskScore: result.resultSummary.riskScore,
+              confidence: result.resultSummary.confidence,
               summary: result.resultSummary.summary || '检测完成',
               riskFactors: result.resultSummary.keyRiskFactors,
               protectiveFactors: result.resultSummary.protectiveFactors,
@@ -2007,22 +2008,15 @@ export default function RiskPage() {
   }
 
   return (
-    <div className="flex flex-col h-full p-6 gap-4">
-      <div className="grid grid-cols-1 gap-3 shrink-0 md:grid-cols-2 xl:grid-cols-4">
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {statCards.map((card) => (
-          <PaperStatCard
-            key={card.label}
-            label={card.label}
-            value={card.value}
-            note={card.note}
-            icon={card.icon}
-            tone={card.tone}
-          />
+          <div key={card.label} className="flex items-center gap-2 border-b border-[#E2E8F0] py-2" title={card.note}><card.icon size={16} aria-hidden="true"/><span>{card.label}</span><strong>{card.value}</strong></div>
         ))}
       </div>
 
       {/* 筛选栏 */}
-      <div className="shrink-0 bg-white rounded-[28px] p-5 shadow-[0_10px_28px_rgba(15,23,42,0.04)] border border-[#E2E8F0]">
+      <div className="bg-white rounded-lg px-4 py-2 border border-[#E2E8F0]">
         <div className="flex flex-wrap items-center gap-3">
           {/* 数据源筛选 */}
           <div className="flex items-center gap-2">
@@ -2079,11 +2073,10 @@ export default function RiskPage() {
       </div>
 
       {/* 任务列表 */}
-      <div className="flex-1 min-h-0 bg-white rounded-[28px] shadow-[0_10px_28px_rgba(15,23,42,0.04)] border border-[#E2E8F0] overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between border-b border-[#E8EEF6] bg-[#FCFDFF] px-5 py-4">
+      <div className="bg-white rounded-lg border border-[#E2E8F0] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between border-b border-[#E8EEF6] bg-[#FCFDFF] px-4 py-2">
           <div>
             <h2 className="text-lg font-semibold text-[#162033]">风险检测任务列表</h2>
-            <p className="mt-1 text-sm text-[#6B7B8F]">统一查看任务名称、数据来源、模型类型、执行状态与结果入口。</p>
           </div>
         </div>
         <div className="overflow-x-auto flex-1">
@@ -2238,6 +2231,7 @@ export default function RiskPage() {
         onClose={() => setIsCreateModalOpen(false)}
         onCreated={handleTaskCreated}
         dataSources={dataSources}
+        initialSelection={initialSelection}
       />
 
       {/* 删除确认弹窗 */}

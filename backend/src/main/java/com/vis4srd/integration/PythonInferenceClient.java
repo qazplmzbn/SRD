@@ -69,6 +69,10 @@ public class PythonInferenceClient {
         return postInfer("/infer/emocc", body);
     }
 
+    public Optional<Map<String, Object>> inferUploadedEmocc(Map<String, Object> input) {
+        return postInfer("/infer/emocc-upload", input);
+    }
+
     @SuppressWarnings("unchecked")
     private Optional<Map<String, Object>> postInfer(String path, Map<String, Object> body) {
         String base = properties.getBaseUrl();
@@ -117,3 +121,4 @@ public class PythonInferenceClient {
         return u;
     }
 }
+

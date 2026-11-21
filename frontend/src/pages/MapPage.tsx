@@ -1173,7 +1173,7 @@ export default function MapPage() {
 
   // ==================== 渲染 ====================
   return (
-    <div className="absolute inset-0 overflow-x-hidden overflow-y-hidden">
+    <div className="relative flex-1 min-h-0 w-full overflow-hidden">
       {/* ==================== 满屏地图（背景层）==================== */}
       <div
         id="gaode-map-container"
@@ -1635,3 +1635,4 @@ export default function MapPage() {
     </div>
   );
 }
+

@@ -10,6 +10,9 @@ import {
   HeartPulse,
 } from 'lucide-react';
 
+import { useAuthStore } from '../../store/authStore';
+import { canOpenSection } from '../../access';
+
 interface NavItem {
   id: string;
   icon: React.ComponentType<any>;
@@ -28,6 +31,7 @@ interface SidebarProps {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', icon: Home, label: '首页' },
+  { id: 'my-posts', icon: BookOpen, label: '贴文记录' },
   { id: 'model', icon: Settings, label: '模型中心' },
   { id: 'knowledge', icon: BookOpen, label: '知识库' },
   { id: 'chat', icon: MessageCircle, label: '智能问答' },
@@ -38,6 +42,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function Sidebar({ activeTab, onNavClick, isCollapsed, setIsCollapsed, isMapPage, isChatPage }: SidebarProps) {
+  const role = useAuthStore(s => s.user?.role);
   const chatFluidNav =
     isChatPage &&
     `shrink-0 ${
@@ -74,7 +79,7 @@ export default function Sidebar({ activeTab, onNavClick, isCollapsed, setIsColla
 
       {/* 导航菜单 */}
       <nav className="flex-1 px-4 py-6 space-y-3 overflow-visible min-h-0 relative z-10">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter(item => canOpenSection(item.id, role)).map((item) => {
           const isActive = activeTab === item.id;
           const Icon = item.icon;
           return (
@@ -134,3 +139,4 @@ export default function Sidebar({ activeTab, onNavClick, isCollapsed, setIsColla
     </div>
   );
 }
+

@@ -19,7 +19,7 @@ class HomeControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void statsShouldReturnSuccessEnvelope() throws Exception {
         mockMvc.perform(get("/api/home/stats"))
                 .andExpect(status().isOk())
@@ -29,7 +29,7 @@ class HomeControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void cardsShouldReturnSuccessEnvelope() throws Exception {
         mockMvc.perform(get("/api/home/cards"))
                 .andExpect(status().isOk())
@@ -38,7 +38,7 @@ class HomeControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "ADMIN")
     void trendShouldReturnCodeAndData() throws Exception {
         mockMvc.perform(get("/api/home/trend").param("days", "7"))
                 .andExpect(status().isOk())

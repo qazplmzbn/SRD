@@ -5,6 +5,17 @@ Java 主服务（:8000）通过 HTTP 调用本服务（:8001）。
 from __future__ import annotations
 
 import traceback
+import threading
+from functools import wraps
+
+_emocc_lock = threading.RLock()
+def serialized_emocc(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _emocc_lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI
@@ -29,6 +40,34 @@ class InferRequest(BaseModel):
     userHash: str = Field(..., min_length=1)
     dataSource: str = "reddit"
     posts: Optional[List[str]] = None
+
+class ReviewRequest(BaseModel):
+    posts: List[str] = Field(...,min_length=1,max_length=32)
+
+class ProbeRequest(BaseModel):
+    train: List[str] = Field(...,min_length=2,max_length=99)
+    labels: List[int] = Field(...,min_length=2,max_length=99)
+    test: List[str] = Field(...,min_length=1,max_length=98)
+
+@app.post('/infer/research-probe')
+@serialized_emocc
+def research_probe(body:ProbeRequest):
+    from fastapi import HTTPException
+    from services.research_probe import predict
+    if (len(body.train)!=len(body.labels) or set(body.labels)!={0,1} or len(body.train)+len(body.test)>100
+            or any(not t.strip() or len(t)>8000 for t in body.train+body.test)):
+        raise HTTPException(422,'Invalid research split')
+    try:return predict(body.train,body.labels,body.test)
+    except (RuntimeError,OSError,ValueError,ImportError):raise HTTPException(503,'Local BERT unavailable')
+
+@app.post('/infer/appointment-review')
+@serialized_emocc
+def appointment_review(body:ReviewRequest):
+    from fastapi import HTTPException
+    if any(not t.strip() or len(t)>20000 for t in body.posts):raise HTTPException(422,'Invalid post')
+    from services.appointment_review import review
+    try:return review(body.posts)
+    except (ImportError,RuntimeError,OSError,ValueError,KeyError):raise HTTPException(503,'Local encoder or checkpoint unavailable')
 
 
 def _ok(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,6 +126,7 @@ def infer_fealearner(body: InferRequest):
 
 
 @app.post("/infer/emocc")
+@serialized_emocc
 def infer_emocc(body: InferRequest):
     try:
         ds = (body.dataSource or "reddit").strip().lower()
@@ -146,3 +186,44 @@ def infer_emocc(body: InferRequest):
     except Exception as ex:
         traceback.print_exc()
         return _fail(str(ex))
+
+class UploadedEmoccRequest(BaseModel):
+    userHash: str = Field(..., min_length=1, max_length=100)
+    dataSource: str = Field(..., pattern="^(reddit|weibo|bigdata|sigir)$")
+    bertEmbeddings: List[List[float]] = Field(..., min_length=1, max_length=50)
+    emojiSequences: List[List[str]] = Field(..., min_length=1, max_length=50)
+    posts: List[str] = Field(..., min_length=1, max_length=50)
+
+
+@app.post("/infer/emocc-upload")
+@serialized_emocc
+def infer_emocc_upload(body: UploadedEmoccRequest):
+    """Infer from supplied features only; never substitute cached user embeddings."""
+    import numpy as np
+    try:
+        count = len(body.bertEmbeddings)
+        if len(body.posts) != count or len(body.emojiSequences) != count:
+            return _fail("特征、表情与贴文数量不一致")
+        if any(len(row) != 768 for row in body.bertEmbeddings):
+            return _fail("每条贴文需要768维BERT特征")
+        features = np.asarray(body.bertEmbeddings, dtype=np.float32)
+        if not np.isfinite(features).all():
+            return _fail("特征包含无效数值")
+        service = get_emocc_service()
+        if not service.is_loaded or getattr(service, "_loaded_dataset", None) != body.dataSource:
+            if not load_emocc_model(dataset_key=body.dataSource):
+                return _fail("对应数据源的Emocc权重加载失败")
+            service._loaded_dataset = body.dataSource
+        result = service.predict_single_user(body.userHash, features, body.emojiSequences, body.posts)
+        if result.risk_class < 0:
+            return _fail("Emocc模型未完成推理")
+        return _ok({"userHash": body.userHash, "dataSource": body.dataSource,
+                    "modelType": "emocc_local", "inputType": "uploaded_features",
+                    "postCount": count, "riskClass": result.risk_class,
+                    "riskLevel": result.risk_level, "confidence": result.confidence,
+                    "classProbs": (result.model_info or {}).get("class_probs", []),
+                    "postAttentionScores": result.post_attention_scores})
+    except Exception:
+        traceback.print_exc()
+        return _fail("上传特征推理失败，请检查特征与模型版本是否匹配")
+

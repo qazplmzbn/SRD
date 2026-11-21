@@ -199,7 +199,7 @@ export interface AuthUser {
   username: string;
   nickname: string;
   avatar_color: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'researcher' | 'doctor';
 }
 
 export interface LoginResponse {

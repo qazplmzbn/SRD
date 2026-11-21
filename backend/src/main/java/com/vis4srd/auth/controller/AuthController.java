@@ -39,8 +39,18 @@ public class AuthController {
 
     @PostMapping("/login")
     public ApiResponse<TokenPayload> login(@Valid @RequestBody LoginRequest body) {
-        AppUser user = authService.authenticate(body.getUsername(), body.getPassword());
+        AppUser user = authService.authenticate(body.getUsername(), body.getPassword(), false);
         return ApiResponse.ok(buildToken(user));
+    }
+
+    @PostMapping("/web/register")
+    public ApiResponse<TokenPayload> registerWeb(@Valid @RequestBody RegisterRequest body) {
+        return ApiResponse.ok(buildToken(authService.registerWeb(body.getUsername(), body.getPassword(), body.getNickname())));
+    }
+
+    @PostMapping("/web/login")
+    public ApiResponse<TokenPayload> loginWeb(@Valid @RequestBody LoginRequest body) {
+        return ApiResponse.ok(buildToken(authService.authenticate(body.getUsername(), body.getPassword(), true)));
     }
 
     @PostMapping("/logout")

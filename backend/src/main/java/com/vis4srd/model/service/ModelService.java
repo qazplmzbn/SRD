@@ -690,7 +690,7 @@ public class ModelService {
         payload.put("prompt", (systemPrompt == null ? "" : systemPrompt) + "\n\n" + prompt);
         payload.put("stream", false);
         Map<String, Object> options = new LinkedHashMap<>();
-        options.put("temperature", temperature > 0 ? temperature : 0.7);
+        options.put("temperature", temperature >= 0 ? temperature : 0.7);
         options.put("num_predict", 512);
         payload.put("options", options);
 
@@ -715,7 +715,7 @@ public class ModelService {
             fail.put("model", modelName);
             return fail;
         } catch (RestClientException ex) {
-            log.warn("Ollama 调用失败: {}", ex.getMessage());
+            log.warn("Ollama 调用失败（上游详情不写入日志）");
             Map<String, Object> fail = new LinkedHashMap<>();
             fail.put("success", false);
             fail.put("error", "Ollama 调用失败: " + ex.getMessage());
@@ -748,7 +748,7 @@ public class ModelService {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", modelName);
-        payload.put("temperature", temperature > 0 ? temperature : 0.7);
+        payload.put("temperature", temperature >= 0 ? temperature : 0.7);
         payload.put("messages", List.of(
                 Map.of("role", "system", "content", systemPrompt == null ? "你是一个有用的AI助手。" : systemPrompt),
                 Map.of("role", "user", "content", prompt)
@@ -780,7 +780,7 @@ public class ModelService {
             fail.put("model", modelName);
             return fail;
         } catch (Exception ex) {
-            log.warn("API 模型调用失败: {}", ex.getMessage());
+            log.warn("API 模型调用失败（上游详情不写入日志）");
             Map<String, Object> fail = new LinkedHashMap<>();
             fail.put("success", false);
             fail.put("error", "API 调用失败: " + ex.getMessage());
