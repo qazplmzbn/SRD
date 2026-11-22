@@ -42,9 +42,22 @@ app:
   datasets:
     dir: ${DATASETS_DIR:../datasets}
   llm:
+    temperature: ${WEB_CHAT_TEMPERATURE:0.3}
+    max-tokens: ${WEB_CHAT_MAX_TOKENS:1000}
     model: ${LLM_MODEL:qwen-flash}
     api-key: ${LLM_API_KEY:}
     base-url: ${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  scenes:
+    ollama-port: ${OLLAMA_PORT:11434}
+    report-model: ${REPORT_MODEL:qwen2.5:7b}
+    report-temperature: 0.1
+    report-max-tokens: 800
+    pet-model: ${PET_MODEL:qwen2.5:7b}
+    pet-temperature: 0.7
+    pet-max-tokens: 60
+    mobile-model: ${MOBILE_CHAT_MODEL:${LLM_MODEL:qwen-flash}}
+    mobile-temperature: 0.5
+    mobile-max-tokens: 300
   python-inference:
     base-url: ${PYTHON_INFERENCE_BASE_URL:http://127.0.0.1:8001}
     connect-timeout-ms: 3000

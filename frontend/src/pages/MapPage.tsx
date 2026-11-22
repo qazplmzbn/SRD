@@ -1496,7 +1496,7 @@ export default function MapPage() {
 
             {/* 分页 */}
             {filteredInstitutions.length > pageSize && (
-              <div className="shrink-0 flex items-center justify-between px-4 py-3 bg-white border-t border-[#E2E8F0]">
+              <div className="archive-pager shrink-0 flex items-center justify-between px-4 py-3 bg-white border-t border-[#E2E8F0]">
                 <span className="text-xs text-[#64748B]">共 {filteredInstitutions.length} 条</span>
                 <div className="flex items-center gap-1">
                   <button
@@ -1509,7 +1509,7 @@ export default function MapPage() {
                     let page = i + 1;
                     if (total > 5) { if (currentPage > 3) page = currentPage - 2 + i; if (currentPage > total - 2) page = total - 4 + i; }
                     return (
-                      <button key={page} onClick={() => setCurrentPage(page)}
+                      <button key={page} aria-current={currentPage===page?'page':undefined} onClick={() => setCurrentPage(page)}
                         className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors ${
                           currentPage === page ? 'bg-[#2F6BFF] text-white' : 'text-[#415168] hover:bg-[#F1F5FA]'
                         }`}>{page}</button>

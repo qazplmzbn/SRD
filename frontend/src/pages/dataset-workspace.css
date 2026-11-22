@@ -1,0 +1,11 @@
+.dataset-workspace,.dataset-workspace .ant-tabs-content-holder,.dataset-workspace .ant-tabs-tabpane {min-width:0;max-width:100%}
+.dataset-workspace .overflow-x-auto {min-width:0;max-width:100%;overflow-x:auto}
+.dataset-workspace .overflow-x-auto>table {min-width:700px}
+.dataset-workspace h2,.dataset-mapping h3 {margin:14px 0 8px;font-size:16px;font-weight:600}
+.dataset-switch {width:min(100%,360px);margin-bottom:12px}
+.dataset-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.dataset-fields label {display:grid;gap:4px;min-width:0}
+.dataset-mapping {border-block:1px solid #e2e8f0;padding:8px 0 16px}
+.dataset-mapping .ant-alert {margin-top:12px}
+.dataset-import-footer {display:flex;justify-content:flex-end;border-top:1px solid #e2e8f0;padding-top:12px}
+@media(max-width:640px){.dataset-fields{grid-template-columns:1fr}.dataset-workspace .rounded-\[28px\]{border-radius:8px;padding:10px}.dataset-workspace .ant-tabs-tab{padding-inline:4px}.dataset-workspace .ant-tabs-tab+.ant-tabs-tab{margin-left:10px}}

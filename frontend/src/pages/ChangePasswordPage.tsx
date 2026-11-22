@@ -72,7 +72,7 @@ export default function ChangePasswordPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 shadow-lg" style={{ background: 'linear-gradient(135deg, #89ACFF 0%, #2F6BFF 55%, #1D4ED8 100%)', boxShadow: '0 14px 28px rgba(47,107,255,.18)' }}>
             <ShieldCheck className="w-8 h-8 text-white" strokeWidth={2} />
           </div>
-          <h1 className="text-2xl font-bold text-[#162033] tracking-tight">账户安全</h1>
+              <h1 className="sr-only">账户安全</h1>
           <p className="text-[#6B7A90] text-sm mt-1">定期更换密码，保护账户安全</p>
         </div>
 

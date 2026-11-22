@@ -17,6 +17,7 @@ public class LlmProperties {
     private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
     private double temperature = 0.7;
+    private int maxTokens = 1000;
 
     private int connectTimeoutMs = 5000;
 

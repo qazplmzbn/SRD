@@ -184,7 +184,9 @@ public class ModelService {
         copyIfKey(body, "modelName", db, "model_name");
         copyIfKey(body, "modelCode", db, "model_code");
         copyIfKey(body, "provider", db, "provider");
-        copyIfKey(body, "apiKey", db, "api_key");
+        if (StringUtils.hasText(asString(body.get("apiKey")))) {
+            db.put("api_key", asString(body.get("apiKey")).trim());
+        }
         copyIfKey(body, "apiBaseUrl", db, "api_base_url");
         copyIfKey(body, "configTemplate", db, "config_template");
         copyIfKey(body, "ollamaModelName", db, "ollama_model_name");
@@ -212,8 +214,17 @@ public class ModelService {
         String setClause = String.join(", ", db.keySet().stream().map(k -> k + " = ?").toList());
         List<Object> params = new ArrayList<>(db.values());
         params.add(modelId);
-        int updated = jdbcTemplate.update("UPDATE models SET " + setClause + " WHERE id = ?", params.toArray());
+        String guard = "";
+        if (db.containsKey("api_base_url") && !db.containsKey("api_key")) {
+            // Never reuse a stored credential at a different endpoint, even during concurrent edits.
+            guard = " AND (api_key IS NULL OR api_key = '' OR BINARY api_base_url <=> BINARY ?)";
+            params.add(db.get("api_base_url"));
+        }
+        int updated = jdbcTemplate.update("UPDATE models SET " + setClause + " WHERE id = ?" + guard, params.toArray());
         if (updated == 0) {
+            if (!guard.isEmpty() && getModelById(modelId) != null) {
+                throw new BusinessException("修改服务地址时请重新填写 API Key");
+            }
             throw new BusinessException(HttpStatus.NOT_FOUND, "模型不存在");
         }
         Map<String, Object> model = getModelById(modelId);
@@ -815,7 +826,6 @@ public class ModelService {
         result.put("modelCategory", row.get("model_category"));
         result.put("modelType", row.get("model_type"));
         result.put("provider", row.get("provider"));
-        result.put("apiKey", row.get("api_key"));
         result.put("apiBaseUrl", row.get("api_base_url"));
         result.put("configTemplate", row.get("config_template"));
         result.put("ollamaModelName", row.get("ollama_model_name"));

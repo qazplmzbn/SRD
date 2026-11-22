@@ -64,7 +64,7 @@ export default function ProfilePage() {
             <User className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">个人资料</h2>
+                <h2 className="sr-only">个人资料</h2>
             <p className="text-white/75 text-sm mt-0.5">维护研究平台中的个人基础信息</p>
           </div>
         </div>

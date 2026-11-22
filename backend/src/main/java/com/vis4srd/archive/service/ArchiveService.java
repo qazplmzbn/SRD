@@ -143,7 +143,6 @@ public class ArchiveService {
                                 FROM user_posts
                                 WHERE archive_id = ?
                                 ORDER BY post_index ASC
-                                LIMIT 20
                                 """,
                         archiveId);
             } catch (Exception ex) {
@@ -155,10 +154,9 @@ public class ArchiveService {
         List<Map<String, Object>> posts = new ArrayList<>();
         for (Map<String, Object> p : postsRows) {
             String content = p.get("content") == null ? "" : String.valueOf(p.get("content"));
-            String text = content.length() > 200 ? content.substring(0, 200) + "..." : content;
             Map<String, Object> post = new LinkedHashMap<>();
             post.put("id", userHash + "_" + p.get("post_index"));
-            post.put("text", text);
+            post.put("text", content);
             post.put("label", p.get("fine_risk_value"));
             post.put("timestamp", formatTsSpace(p.get("post_timestamp")));
             post.put("hasEmojis", p.get("emoji_sequence") != null

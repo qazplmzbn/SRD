@@ -18,8 +18,7 @@ const groups = [
   ] },
   { label: '专业服务', items: [
     { path: '/certification', label: '医生认证' },
-    { path: '/appointments', label: '预约管理', related: ['/authorized-users'] },
-    { path: '/care-users', label: '用户资料', related: ['/scale'] },
+    { path: '/appointments', label: '预约与用户资料', related: ['/care-users', '/authorized-users', '/scale'] },
   ] },
   { label: '平台管理', items: [
     { path: '/admin-workspace', label: '管理概览' },

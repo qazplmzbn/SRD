@@ -20,3 +20,41 @@ CREATE TABLE IF NOT EXISTS care_live_grants (
     appointment_id VARCHAR(36) PRIMARY KEY, source_key VARCHAR(36) NOT NULL
 );
 CREATE TABLE IF NOT EXISTS care_analysis_grants (appointment_id VARCHAR(36) PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS care_booking_consent (appointment_id VARCHAR(36) PRIMARY KEY);
+
+CREATE TABLE IF NOT EXISTS douyin_auth_state (
+ owner_id BIGINT PRIMARY KEY, nonce VARCHAR(64) NOT NULL, expires BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS douyin_connections (
+ owner_id BIGINT PRIMARY KEY, open_id VARCHAR(128) NOT NULL, credentials TEXT NOT NULL,
+ generation VARCHAR(36) NOT NULL, page_cursor BIGINT NOT NULL, next_run BIGINT NOT NULL,
+ status VARCHAR(20) NOT NULL, last_success BIGINT NOT NULL, INDEX(next_run)
+);
+
+CREATE TABLE IF NOT EXISTS douyin_sync_coverage (
+ owner_id BIGINT PRIMARY KEY, generation VARCHAR(36) NOT NULL,
+ pages INT NOT NULL, item_count INT NOT NULL, oldest_create_time BIGINT NULL,
+ newest_create_time BIGINT NULL, upstream_has_more BOOLEAN NOT NULL, finished BOOLEAN NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS social_post_details (
+ post_id VARCHAR(36) PRIMARY KEY, external_id VARCHAR(255) NOT NULL, metadata JSON NOT NULL,
+ FOREIGN KEY (post_id) REFERENCES personal_posts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS social_post_metrics (
+ post_id VARCHAR(36) NOT NULL, sampled_at BIGINT NOT NULL, metrics JSON NOT NULL,
+ PRIMARY KEY (post_id, sampled_at), FOREIGN KEY (post_id) REFERENCES personal_posts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS douyin_metric_checks (
+ post_id VARCHAR(36) PRIMARY KEY, next_check BIGINT NOT NULL, result VARCHAR(20) NOT NULL,
+ FOREIGN KEY (post_id) REFERENCES personal_posts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS weibo_connections (
+ owner_id BIGINT PRIMARY KEY, credentials TEXT NOT NULL, uid VARCHAR(128) NOT NULL,
+ status VARCHAR(24) NOT NULL, next_run BIGINT NOT NULL, last_success BIGINT NOT NULL,
+ page_no INT NOT NULL, page_cursor VARCHAR(128) NOT NULL, initial_done BOOLEAN NOT NULL,
+ auth_expires BIGINT NOT NULL, poll_seconds INT NOT NULL, INDEX(next_run)
+);

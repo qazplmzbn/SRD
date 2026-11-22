@@ -7,8 +7,7 @@ export function canOpenSection(section: string, role?: string) {
   if (section === 'verification-review') return role === 'admin';
   if (section === 'certification') return role === 'researcher' || role === 'doctor';
   if (['archive', 'risk', 'model', 'research-data', 'research-models', 'research-versions', 'research-experiments'].includes(section)) return canUseResearch(role);
-  // Existing model configuration exposes credentials; research-safe model APIs follow in phase two.
-  if (section === 'model-config') return role === 'admin';
+  if (section === 'model-config') return canUseResearch(role);
   return true;
 }
 

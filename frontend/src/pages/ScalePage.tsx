@@ -348,7 +348,7 @@ function CreateTaskModal({
               )}
             </div>
             {selectedDataSource && (
-              <div className="mt-3 flex items-center justify-between text-xs text-[#64748B]">
+              <div className="archive-pager mt-3 flex items-center justify-between text-xs text-[#64748B]">
                 <span>每页 20 位用户</span>
                 <div className="flex items-center gap-2">
                   <button

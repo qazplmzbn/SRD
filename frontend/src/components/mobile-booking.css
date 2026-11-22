@@ -1,6 +1,8 @@
 .mobile-booking {padding:12px 0;color:#162033;overflow-wrap:anywhere;}
 .mobile-booking form {display:grid;grid-template-columns:minmax(0,1fr);gap:16px;background:white;padding:16px;border-radius:8px;}
 .mobile-booking .booking-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.mobile-booking .booking-toggle {background:white;border-radius:8px;padding:14px 16px;}
+.booking-toggle[aria-expanded=true] svg:last-child {transform:rotate(180deg);}
 .mobile-booking h2,.mobile-booking h3,.mobile-booking p {margin:0;}
 .mobile-booking h2 {font-size:18px;flex-shrink:0;}
 .mobile-booking h3,.booking-field label {font-size:14px;font-weight:600;}
@@ -18,4 +20,9 @@
 .mobile-booking .booking-empty,.booking-row {padding:16px;background:white;border-radius:8px;}
 .mobile-booking .booking-empty {text-align:center;color:#596b83;font-size:14px;}
 .booking-row+.booking-row {margin-top:8px;}
+.mobile-booking .booking-row {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;border:1px solid #e0e6ed;align-items:center;}
+.booking-row header {grid-column:1/-1;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.booking-row header .ant-tag {margin:0;}
+.booking-row time {color:#506073;font-size:14px;font-variant-numeric:tabular-nums;}
+.booking-row .ant-btn {min-height:40px;}
 .booking-row p {padding:6px 0;color:#596b83;font-size:13px;}

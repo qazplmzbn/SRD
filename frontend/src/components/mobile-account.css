@@ -1,0 +1,11 @@
+.mobile-prototype .mobile-account {width:100%;max-width:28rem;margin:0 auto;padding:20px 16px max(24px,env(safe-area-inset-bottom));color:#233438;overflow-wrap:anywhere}
+.mobile-account .account-caption {margin:0 0 6px;color:#47665f;font-size:14px;font-weight:600}
+.mobile-account h2 {margin:0 0 20px;font-size:24px;line-height:1.35}
+.mobile-account .account-owner {margin:-12px 0 18px;color:#526361}
+.mobile-account form,.mobile-account label {display:grid;grid-template-columns:minmax(0,1fr)}
+.mobile-account form {gap:14px}
+.mobile-account label {gap:6px;font-size:14px;font-weight:600}
+.mobile-account label > .ant-input,.mobile-account .ant-input-affix-wrapper,.mobile-account .ant-btn {min-height:46px;border-radius:8px}
+.mobile-account label input.ant-input {font-size:16px;font-weight:400}
+.mobile-account small {color:#526361}
+.mobile-account #account-mismatch {margin:0;color:#a32f36;font-size:14px}

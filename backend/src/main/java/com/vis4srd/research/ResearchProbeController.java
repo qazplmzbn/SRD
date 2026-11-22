@@ -31,6 +31,7 @@ public class ResearchProbeController {
         List<String> train=new ArrayList<>(),test=new ArrayList<>();
         List<Integer> labels=new ArrayList<>(),expected=new ArrayList<>(),indices=new ArrayList<>();
         int index=0;
+        if(version.containsKey("table"))throw invalid("通用表格未配置二分类实验字段");
         for(JsonNode sample:(JsonNode)version.get("samples")) {
             String text=sample.path("text").asText(); int label=sample.path("label").asInt();
             if("TRAIN".equals(sample.path("split").asText())) {train.add(text);labels.add(label);}

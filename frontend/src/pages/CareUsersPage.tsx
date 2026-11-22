@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Alert, Button, Empty, Select, Space, Spin, Tabs } from 'antd';
-import { RefreshCw, UserRound } from 'lucide-react';
+import { Alert, Collapse, Empty, Select, Spin, Tabs } from 'antd';
 import './care-profile.css';
-import PostReview from '../components/PostReview';
+import DoctorRiskDesk from '../components/DoctorRiskDesk';
 import VisitBrief from '../components/VisitBrief';
+import SharedPosts from '../components/SharedPosts';
 import { request } from '../api';
 import { useAuthStore } from '../store/authStore';
 
 type Booking = { id: string; patientId: number; name: string; state: string; shared: boolean; scheduledAt: string };
 type Records = { posts: { text: string; date?: string }[]; results: { name: string; score: number; date?: string }[] };
 
-export default function CareUsersPage() {
+export default function CareUsersPage({view='patients'}:{view?:string}) {
   const doctorId = useAuthStore(s => s.user?.id);
-  return <CareUsers key={doctorId} />;
+  return <CareUsers key={doctorId} view={view} />;
 }
 
-function CareUsers() {
+function CareUsers({view}:{view:string}) {
   const initialBooking=useRef(useLocation().state?.appointment);
   const [rows, setRows] = useState<Booking[]>([]);
   const [patientId, setPatientId] = useState<number>();
@@ -53,24 +53,19 @@ function CareUsers() {
   const bookings = rows.filter(row => row.patientId === patientId);
   const selectBooking = (id?: string) => { setRecords(undefined); setRecordError(''); setBookingId(id); };
   return <section className="pro-page">
-    <div className="pro-page-heading"><h1>用户资料</h1></div>
+    {view==='patients'?<>
     {error && <Alert type="error" showIcon message={error} />}
-    {loading ? <Spin /> : !error && patients.size === 0 ? <Empty description="暂无已接受且同意共享资料的预约" /> : patients.size > 0 && <>
-      <div className="care-selectors">
-        <Select aria-label="选择用户" placeholder="选择用户" style={{ width: 240 }} value={patientId} options={Array.from(patients, ([value, name]) => ({ value, label: `${name}（账号 ${value}）` }))} onChange={id => {
-          setPatientId(id);
-          const matches = rows.filter(row => row.patientId === id);
-          selectBooking(matches.length === 1 ? matches[0].id : undefined);
-        }} />
+    {loading ? <Spin /> : !error && patients.size === 0 ? <Empty description="暂无已接受的预约" /> : patients.size > 0 && <>
+      <dl className="care-stats" aria-label="共享资料统计"><div><dt>共享用户</dt><dd>{patients.size} 人</dd></div><div><dt>共享预约</dt><dd>{rows.length} 次</dd></div><div><dt>多次预约用户</dt><dd>{[...patients.keys()].filter(id=>rows.filter(b=>b.patientId===id).length>1).length} 人</dd></div></dl>
+      <Collapse accordion activeKey={patientId===undefined?[]:[String(patientId)]} onChange={key=>{const raw=Array.isArray(key)?key[0]:key;const id=raw?Number(raw):undefined;setPatientId(id);selectBooking(rows.find(row=>row.patientId===id)?.id)}} items={Array.from(patients,([id,name])=>({key:String(id),label:`${name}（账号 ${id}）`,extra:`${rows.filter(b=>b.patientId===id).length} 次共享预约`,children:patientId===id&&<><div className="care-selectors">
         <Select aria-label="选择预约" placeholder="选择预约" style={{ width: 240 }} disabled={!patientId} value={bookingId} options={bookings.map(row => ({ value: row.id, label: `${new Date(row.scheduledAt).toLocaleString()} · ${row.id.slice(0, 8)}` }))} onChange={selectBooking} />
       </div>
-      {patientId!==undefined?<><header className="care-identity"><div className="care-initial" aria-hidden="true">{Array.from(patients.get(patientId)||'')[0]||<UserRound/>}</div><div><h2>{patients.get(patientId)}</h2><p>账号 {patientId}</p></div><dl><div><dt>授权预约</dt><dd>{bookings.length} 次</dd></div><div><dt>当前预约时间</dt><dd>{bookingId?new Date(bookings.find(r=>r.id===bookingId)!.scheduledAt).toLocaleString():'尚未选择'}</dd></div></dl></header>
       <section className="care-records"><h2>本次共享记录</h2>{recordError ? <Alert type="error" showIcon message={recordError} /> : records ? <Tabs key={bookingId} items={[
-        {key:'brief',label:'诊前概览',children:<VisitBrief key={JSON.stringify(records.posts)} {...records}/>},
-        { key: 'posts', label: `贴文 (${records.posts.length})`, children: records.posts.length ? records.posts.map((post, i) => <article className="pro-review-item" key={i}><div><small className="pro-muted">{post.date}</small><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{post.text}</p></div></article>) : <Empty description="本次预约没有共享贴文" /> },
+        {key:'brief',label:'诊前概览',children:<><header className="care-identity"><span className="care-initial">{name.slice(0,1)}</span><div><h2>{name}</h2><p>账号 {id}</p></div><dl><div><dt>预约时间</dt><dd>{new Date(bookings.find(b=>b.id===bookingId)!.scheduledAt).toLocaleString()}</dd></div><div><dt>模型分析</dt><dd>{records.posts.length?'可分析':'无共享贴文'}</dd></div></dl></header><VisitBrief key={JSON.stringify(records.posts)} {...records}/></>},
+        { key: 'posts', label: `贴文 (${records.posts.length})`, children:<SharedPosts posts={records.posts}/> },
         { key: 'scales', label: `量表结果 (${records.results.length})`, children: records.results.length ? records.results.map((result, i) => <article className="pro-review-item" key={i}><div><strong>{result.name}</strong><p className="pro-muted">{result.date}</p></div><span>{result.score} 分</span></article>) : <Empty description="本次预约没有共享量表结果" /> },
-        {key:'analysis',label:'模型复核',children:<PostReview key={JSON.stringify(records.posts)} id={bookingId!} posts={records.posts}/>},
-      ]} /> : bookingId ? <Spin /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择一次预约"/>}</section></>:<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择用户"/>}
+      ]} /> : bookingId ? <Spin /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择一次预约"/>}</section></>}))}/>
     </>}
+      </>:<DoctorRiskDesk/>}
   </section>;
 }

@@ -814,7 +814,7 @@ function ImportWizardModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
-      <div className="relative bg-[#F7FAFD] rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden animate-scale-in border border-[#E2E8F0]">
+      <div role="dialog" aria-modal="true" aria-label="导入研究档案数据" className="relative flex flex-col bg-[#F7FAFD] rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90dvh] overflow-hidden animate-scale-in border border-[#E2E8F0]">
         {/* 头部 */}
         <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E2E8F0]">
           <div className="flex items-center gap-3">
@@ -831,9 +831,9 @@ function ImportWizardModal({
           </button>
         </div>
 
-        <div className="flex min-h-[480px]">
+        <div className="flex min-h-0 overflow-y-auto overscroll-contain" tabIndex={0} aria-label="导入步骤内容">
           {/* 左侧步骤条 */}
-          <div className="w-52 bg-[#F7FAFD] p-5 border-r border-[#E2E8F0]">
+          <div className="hidden md:block w-52 shrink-0 bg-[#F7FAFD] p-5 border-r border-[#E2E8F0]">
             <div className="sticky top-5">
               <h4 className="text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-4">导入步骤</h4>
               {steps.map((step) => (
@@ -859,7 +859,7 @@ function ImportWizardModal({
           </div>
 
           {/* 右侧内容 */}
-          <div className="flex-1 p-6 overflow-y-auto bg-[#F7FAFD]">
+          <div className="flex-1 min-w-0 p-3 md:p-6 bg-[#F7FAFD]">
             {currentStep === 1 && (
               <div className="space-y-5">
                 <div className="bg-white rounded-2xl p-5 border border-[#E2E8F0] shadow-sm">
@@ -1341,7 +1341,7 @@ function ImportWizardModal({
         </div>
 
         {/* 底部按钮 */}
-        <div className="flex justify-between items-center p-5 bg-white border-t border-[#E2E8F0]">
+        <div className="shrink-0 flex justify-between items-center p-3 bg-white border-t border-[#E2E8F0]">
           <ActionCapsuleButton onClick={() => currentStep > 1 && setCurrentStep(s => s - 1)}
             disabled={currentStep === 1}
             variant="neutral"
@@ -1394,7 +1394,7 @@ function ImportWizardModal({
 
 // ==================== 主页面组件 ====================
 
-export default function ArchivePage({ dataset = '' }: { dataset?: string }) {
+export default function ArchivePage({ dataset = '', classification, onImport, canManage=true }: { dataset?: string; classification?: React.ReactNode; onImport?:()=>void; canManage?:boolean }) {
   const navigate = useNavigate();
   const [filters, setFilters] = useState({ keyword: '', dataSource: dataset, status: '' });
   const [appliedFilters, setAppliedFilters] = useState({ keyword: '', dataSource: dataset, status: '' });
@@ -1469,7 +1469,7 @@ export default function ArchivePage({ dataset = '' }: { dataset?: string }) {
       try {
         const [datasets, templateResp] = await Promise.all([
           fetchDatasets(),
-          fetchArchiveTemplates().catch(() => ({ sources: {} })),
+          onImport ? Promise.resolve({sources:{}}) : fetchArchiveTemplates().catch(() => ({ sources: {} })),
         ]);
         setArchiveTemplates(templateResp.sources || {});
         if (datasets && datasets.length > 0) {
@@ -1665,24 +1665,25 @@ export default function ArchivePage({ dataset = '' }: { dataset?: string }) {
         <div className="flex flex-wrap items-center gap-4">
           <span className="text-sm font-medium text-[#334155]">快捷操作：</span>
           <ActionCapsuleButton
-            onClick={() => setIsImportModalOpen(true)}
+            onClick={onImport??(() => setIsImportModalOpen(true))}
             variant="solid"
             icon={<Plus className="w-4 h-4" />}
           >
-            导入数据
+            {onImport?'从数据集生成档案':'导入数据'}
           </ActionCapsuleButton>
-          <ActionCapsuleButton
+          {canManage&&<ActionCapsuleButton
             onClick={() => { setIsBatchMode(true); setIsBatchPanelOpen(true); }}
             variant="neutral"
             icon={<Layers className="w-4 h-4" />}
           >
             批量管理
-          </ActionCapsuleButton>
+          </ActionCapsuleButton>}
         </div>
       </div>
 
       <div className="shrink-0 bg-white rounded-[28px] p-5 shadow-[0_10px_28px_rgba(15,23,42,0.04)] border border-[#E2E8F0]">
         <div className="flex flex-wrap gap-4">
+          {classification}
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-[#415168]">关键词：</label>
             <input type="text" placeholder="输入用户ID关键词"
@@ -1831,9 +1832,9 @@ export default function ArchivePage({ dataset = '' }: { dataset?: string }) {
                         }} tone="blue" tableAction icon={<Eye className="w-4 h-4" />}>
                           查看
                         </ActionCapsuleButton>
-                        <ActionCapsuleButton onClick={() => handleDeleteArchive(archive)} tone="red" tableAction icon={<Trash2 className="w-4 h-4" />}>
+                        {canManage&&<ActionCapsuleButton onClick={() => handleDeleteArchive(archive)} tone="red" tableAction icon={<Trash2 className="w-4 h-4" />}>
                           删除
-                        </ActionCapsuleButton>
+                        </ActionCapsuleButton>}
                       </div>
                     </td>
                   </tr>

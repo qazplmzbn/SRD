@@ -58,10 +58,11 @@ interface RiskTask {
   processingTimeMs?: number;
 }
 
-interface RiskResultSummary {
+export interface RiskResultSummary {
   riskLevel: 'low' | 'medium' | 'high';
   riskScore: number;
-  confidence: number;
+  confidence?: number;
+  inferenceBackend?: string;
   summary: string;
   emoccModelResult?: {
     riskLevel: string;
@@ -116,6 +117,7 @@ interface RiskResultSummary {
   };
   symptomDescription?: string;
   emotionalAnalysis?: string;
+  knowledgeEvidence?: {id:string; title:string; snippet:string}[];
   riskInterpretation?: string;
   keyHighlight?: string;
   riskFactors?: string[];
@@ -357,9 +359,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
 
   const activeApiModels = apiModels.filter((model) => model.status === 'active');
   const activeLlmModels = llmModels.filter((model) => model.status === 'active');
-  const activePromptTemplates = promptTemplates.filter((template) =>
-    template.taskType.includes('自杀风险')
-  );
+  const activePromptTemplates = promptTemplates;
 
   const compatibleDetectionModels = detectionModels.filter((model) => {
     if (model.status !== 'active') return false;
@@ -395,11 +395,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
     if (!isOpen) return;
     if (modelCategory !== 'api' && modelCategory !== 'local_llm') return;
     if (selectedTemplate && activePromptTemplates.some((template) => template.id === selectedTemplate.id)) return;
-    const defaultTemplate =
-      activePromptTemplates.find((template) => template.taskType.includes('自杀风险')) ||
-      activePromptTemplates[0] ||
-      null;
-    setSelectedTemplate(defaultTemplate);
+    setSelectedTemplate(null);
   }, [isOpen, modelCategory, selectedTemplate, activePromptTemplates]);
 
   useEffect(() => {
@@ -477,6 +473,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
             body: JSON.stringify({
               userHash: selectedUser.userHash,
               dataSource: selectedSource,
+              detectionModelId: Number(selectedDetectionModel?.id),
               taskName: taskName,
             }),
             signal: controller.signal,
@@ -740,7 +737,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
                 )}
               </div>
               {selectedSource && (
-                <div className="flex items-center justify-between text-xs text-[#64748B]">
+                <div className="archive-pager flex items-center justify-between text-xs text-[#64748B]">
                   <span>每页 20 位用户</span>
                   <div className="flex items-center gap-2">
                     <button
@@ -992,7 +989,7 @@ function buildReportHtml(reportData: any): string {
   const emocc = rs.emoccModelResult;
   const riskLevel = rs.riskLevel || 'unknown';
   const riskScore = rs.riskScore;
-  const confidence = rs.confidence == null ? '未返回' : rs.confidence+'%';
+  const confidence = formatConfidence(rs.confidence);
 
   const riskColors: Record<string, string> = { low: '#22c55e', medium: '#f59e0b', high: '#ef4444' };
   const riskLabels: Record<string, string> = { low: '低风险', medium: '中风险', high: '高风险' };
@@ -1096,7 +1093,7 @@ function buildReportHtml(reportData: any): string {
 
   <div class="risk-level-box">
     <div class="level">${riskLabel}</div>
-    <div class="score">风险分数: ${riskScore?.toFixed(2) ?? '未返回'} / 置信度: ${confidence} / 调用模型: ${escapeHtml(rs.llmModel || rs.emotionalAnalysis ? (reportData.modelName || 'qwen-flash') : '')}</div>
+    <div class="score">风险分数: ${riskScore?.toFixed(2) ?? '未返回'} / 置信度: ${confidence} / 大模型解读: ${escapeHtml(rs.llmModel || (rs.fusionMethod === 'detector_only' ? '未完成，仅展示检测结果' : '未记录'))}</div>
   </div>
 
   <div class="risk-banner">
@@ -1151,6 +1148,7 @@ function buildReportHtml(reportData: any): string {
   ${rs.protectiveFactors?.length ? `<div class="section factor-green"><div class="section-title">保护因素</div>${renderList(rs.protectiveFactors)}</div>` : ''}
   ${rs.interventionSuggestion ? `<div class="section intervention-box"><div class="section-title">干预建议</div><p>${escapeHtml(rs.interventionSuggestion)}</p></div>` : ''}
   ${rs.professionalAdvice ? `<div class="section advice-box"><div class="section-title">专业建议</div><p>${escapeHtml(rs.professionalAdvice)}</p></div>` : ''}
+  ${rs.knowledgeEvidence?.length ? `<div class="section"><div class="section-title">知识库参考片段</div>${rs.knowledgeEvidence.map(e => `<p>[${escapeHtml(e.id)}] ${escapeHtml(e.title)}：${escapeHtml(e.snippet)}</p>`).join('')}</div>` : ''}
   ${rs.followUpSuggestion ? `<div class="section followup-box"><div class="section-title">随访建议</div><p>${escapeHtml(rs.followUpSuggestion)}</p></div>` : ''}
 
   ${attScores.length ? `<div class="section">
@@ -1180,9 +1178,15 @@ function buildReportHtml(reportData: any): string {
 interface ResultPageProps {
   task: RiskTask;
   onBack: () => void;
+  appointment?: { promptName?: string; total: number; posts: {text: string; date?: string}[]; rawModel?: string; encoder?: string };
 }
 
-function ResultPage({ task, onBack }: ResultPageProps) {
+function formatConfidence(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+    ? `${(value <= 1 ? value * 100 : value).toFixed(1)}%` : '未返回';
+}
+
+export function ResultPage({ task, onBack, appointment }: ResultPageProps) {
   const result = task.resultSummary;
   const rc = result ? RISK_COLORS[result.riskLevel] : null;
   const emocc = result?.emoccModelResult;
@@ -1200,7 +1204,12 @@ function ResultPage({ task, onBack }: ResultPageProps) {
     if (!task.resultSummary) return;
     setIsGeneratingReport(true);
     try {
-      const reportData = await fetchRiskReport(task.id);
+      const reportData = appointment ? {
+        ...task,
+        task: {...task, userHash: '本次预约用户'},
+        userHash: '本次预约用户',
+        resultSummary: task.resultSummary,
+      } : await fetchRiskReport(task.id);
       const html = buildReportHtml(reportData);
       const win = window.open('', '_blank');
       if (win) {
@@ -1243,6 +1252,7 @@ function ResultPage({ task, onBack }: ResultPageProps) {
               耗时: <span className="font-medium text-[#415168]">{formatTime(task.processingTimeMs)}</span>
             </span>
           )}
+          {appointment && <span>共享贴文：{appointment.total} 条{appointment.promptName && ` · 提示词：${appointment.promptName}`}</span>}
         </div>
       </div>
 
@@ -1270,14 +1280,14 @@ function ResultPage({ task, onBack }: ResultPageProps) {
               </div>
               <div className="bg-gradient-to-br from-[#F7FAFD] to-[#F3F8FF] rounded-xl p-5 text-center border border-[#E2E8F0]">
                 <p className="text-sm text-[#64748B] mb-3">置信度</p>
-                <p className="text-3xl font-bold text-[#162033]">{result.confidence == null ? '未返回' : `${result.confidence}%`}</p>
+                <p className="text-3xl font-bold text-[#162033]">{formatConfidence(result.confidence)}</p>
               </div>
             </div>
 
             {/* 综合评估摘要 */}
             {result.summary && (
               <div className="bg-gradient-to-r from-[#F1F5FA] to-[#F7F9FC] rounded-xl p-5 border border-[#E2E8F0] mb-4">
-                <p className="text-sm font-semibold text-[#415168] mb-2">综合评估摘要</p>
+                <p className="text-sm font-semibold text-[#415168] mb-2">{appointment && (appointment.rawModel || result.inferenceBackend === 'heuristic_fallback') ? '文本规则线索' : '综合评估摘要'}</p>
                 <p className="text-sm text-[#415168] leading-relaxed">{result.summary}</p>
               </div>
             )}
@@ -1320,7 +1330,7 @@ function ResultPage({ task, onBack }: ResultPageProps) {
                     <Brain className="w-4 h-4" /> Emocc 模型详情
                   </p>
                   <span className="text-xs text-purple-500 bg-purple-100 px-2 py-0.5 rounded-full">
-                    {emocc.modelType === 'emocc_local' ? '真实模型' : '模拟模型'}
+                    {result?.inferenceBackend === 'heuristic_fallback' ? '规则回退' : emocc.modelType === 'emocc_local' ? '真实模型' : '模拟模型'}
                   </span>
                 </div>
                 <div className="grid grid-cols-4 gap-3 mb-4">
@@ -1340,7 +1350,7 @@ function ResultPage({ task, onBack }: ResultPageProps) {
                   </div>
                   <div className="bg-white rounded-lg p-3 border border-purple-100 text-center">
                     <p className="text-xs text-purple-600 mb-1">置信度</p>
-                    <p className="font-bold text-purple-800">{((emocc.confidence ?? 0) * 100).toFixed(1)}%</p>
+                    <p className="font-bold text-purple-800">{formatConfidence(emocc.confidence)}</p>
                   </div>
                 </div>
 
@@ -1527,6 +1537,7 @@ function ResultPage({ task, onBack }: ResultPageProps) {
             )}
 
             {/* 专业建议 */}
+            {!!result.knowledgeEvidence?.length && <details><summary>知识库参考片段</summary>{result.knowledgeEvidence.map(e=><p key={e.id}>[{e.id}] {e.title}：{e.snippet}</p>)}</details>}
             {result.professionalAdvice && (
               <div className="mt-4 bg-blue-50 rounded-xl p-4 border border-blue-200">
                 <p className="text-sm font-semibold text-blue-800 mb-2">专业建议</p>
@@ -1552,6 +1563,11 @@ function ResultPage({ task, onBack }: ResultPageProps) {
         )}
       </div>
 
+      {appointment && <section className="space-y-3 border-y bg-white p-5">
+        <h3 className="font-semibold">本次预约的参考原文</h3>
+        <p className="text-sm text-slate-600">{result?.inferenceBackend === 'heuristic_fallback' ? '评分来源：文本规则回退。' : appointment.rawModel ? `评分来源：${appointment.rawModel}${appointment.encoder ? ` · ${appointment.encoder}` : ''}。` : '大模型仅使用每条贴文的前 300 字。'}报告仅供人工复核，不构成诊断。</p>
+        {appointment.posts.map((post,i)=><article key={i} className="border-t pt-3"><strong>原文 {i+1}</strong> <small>{post.date}</small><p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{post.text}</p></article>)}
+      </section>}
       {/* 操作按钮 */}
       <div className="flex items-center justify-center gap-4 pt-2">
         <ActionCapsuleButton
@@ -1666,6 +1682,7 @@ export default function RiskPage() {
               emoccModelResult: t.resultSummary.emoccModelResult,
               symptomDescription: t.resultSummary.symptomDescription,
               emotionalAnalysis: t.resultSummary.emotionalAnalysis,
+              knowledgeEvidence: t.resultSummary.knowledgeEvidence,
               riskInterpretation: t.resultSummary.riskInterpretation,
               riskFactors: t.resultSummary.riskFactors,
               protectiveFactors: t.resultSummary.protectiveFactors,
@@ -1704,6 +1721,7 @@ export default function RiskPage() {
               fealearnerModelResult: t.resultSummary.fealearnerModelResult,
               symptomDescription: t.resultSummary.symptomDescription,
               emotionalAnalysis: t.resultSummary.emotionalAnalysis,
+              knowledgeEvidence: t.resultSummary.knowledgeEvidence,
               riskInterpretation: t.resultSummary.riskInterpretation,
               riskFactors: t.resultSummary.riskFactors,
               protectiveFactors: t.resultSummary.protectiveFactors,
@@ -1859,6 +1877,7 @@ export default function RiskPage() {
               emoccModelResult: result.resultSummary.emoccModelResult,
               symptomDescription: result.resultSummary.symptomDescription,
               emotionalAnalysis: result.resultSummary.emotionalAnalysis,
+              knowledgeEvidence: result.resultSummary.knowledgeEvidence,
               riskInterpretation: result.resultSummary.riskInterpretation,
               riskFactors: result.resultSummary.riskFactors,
               protectiveFactors: result.resultSummary.protectiveFactors,
@@ -1901,6 +1920,7 @@ export default function RiskPage() {
               fealearnerModelResult: result.resultSummary.fealearnerModelResult,
               symptomDescription: result.resultSummary.symptomDescription,
               emotionalAnalysis: result.resultSummary.emotionalAnalysis,
+              knowledgeEvidence: result.resultSummary.knowledgeEvidence,
               riskInterpretation: result.resultSummary.riskInterpretation,
               riskFactors: result.resultSummary.riskFactors,
               protectiveFactors: result.resultSummary.protectiveFactors,
@@ -2201,7 +2221,7 @@ export default function RiskPage() {
 
         {/* 分页 */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-[#E2E8F0] bg-[#F7F9FC] shrink-0">
+          <div className="archive-pager flex items-center justify-between px-6 py-4 border-t border-[#E2E8F0] bg-[#F7F9FC] shrink-0">
             <p className="text-sm text-[#64748B]">
               共 {filteredTasks.length} 条，第 {currentPage}/{totalPages} 页
             </p>

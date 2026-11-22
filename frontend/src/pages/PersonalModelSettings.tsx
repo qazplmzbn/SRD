@@ -1,7 +1,8 @@
 import {useEffect,useState} from 'react';
-import {Link, Navigate, useLocation} from 'react-router-dom';
+import {Navigate, useLocation} from 'react-router-dom';
+import {ModelCenterTabs} from './ModelCenterPage';
 import {Alert,Button,Checkbox,Radio,Spin,message} from 'antd';
-import {Bot,Cloud,FileCode,Save,Server,Settings} from 'lucide-react';
+import {Bot,Cloud,Save,Server} from 'lucide-react';
 import {request} from '../api';
 import {useAuthStore} from '../store/authStore';
 import {readPreferences,savePreferences,questions} from '../professionalPreferences';
@@ -25,13 +26,9 @@ function Preferences({id,doctor,template}:{id:number;doctor:boolean;template:boo
   },[template,attempt]);
   const panel='overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-sm';
   const row='flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-[#E2E8F0] last:border-0';
-  const tab=(active:boolean)=>`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm ${active?'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md':'text-gray-500 hover:bg-gray-50'}`;
   const groups=[{name:'API 模型',type:'api',Icon:Cloud},{name:'本地 LLM 模型',type:'ollama',Icon:Server}];
-  return <section className="flex flex-col gap-4">
-    <nav aria-label="个人模型中心" className="inline-flex self-start rounded-2xl border border-[#E2E8F0] bg-white p-1.5 shadow-sm">
-      <Link to="/model" aria-current={!template?'page':undefined} className={tab(!template)}><Settings size={16}/>模型配置</Link>
-      <Link to="/model/template" aria-current={template?'page':undefined} className={tab(template)}><FileCode size={16}/>提示词配置</Link>
-    </nav>
+  return <section className="model-center-original flex flex-1 flex-col min-h-0 w-full gap-4 md:gap-5 animate-fade-in">
+    <ModelCenterTabs base="/model"/>
     <header className={`${panel} ${row}`}><div><h1 className="text-lg font-semibold">{template?'提示词配置':'模型配置'}</h1><small className="pro-muted">个人默认配置 · 当前浏览器</small></div><Button icon={<Save size={16}/>} type="primary" onClick={()=>{try{savePreferences(id,prefs);message.success('默认配置已保存')}catch{message.error('无法保存到当前浏览器')}}}>保存默认配置</Button></header>
     {template?<><section className={panel}><h2 className="bg-blue-50 px-5 py-3 font-semibold">研究实验 · 分类判定模板</h2>
       {([{key:'speaker',label:'区分自述、转述与引用'},{key:'negation',label:'核对否定词的对象和范围'}] as const).map(rule=><div className={row} key={rule.key}><Checkbox checked={prefs[rule.key]} onChange={e=>setPrefs({...prefs,[rule.key]:e.target.checked})}>{rule.label}</Checkbox><small className="pro-muted">补充判定步骤</small></div>)}</section>

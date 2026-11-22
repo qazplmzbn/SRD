@@ -131,6 +131,14 @@ public class LlmChatClient {
         return StringUtils.hasText(llmProperties.getModel()) ? llmProperties.getModel() : "qwen-flash";
     }
 
+    public String sceneChat(String system, String question, String model, Integer localPort, double temperature, int limit) {
+        var body = buildPayload(system, question, model, false);
+        body.put("temperature", temperature);
+        body.put("max_tokens", limit);
+        return extractContent(postJson(body, localPort == null ? null : "ollama",
+                localPort == null ? null : "http://127.0.0.1:" + localPort + "/v1", false));
+    }
+
     private Map<String, Object> buildPayload(
             String systemPrompt, String userPrompt, String model, boolean stream) {
         List<Map<String, String>> messages = new ArrayList<>();
@@ -143,6 +151,7 @@ public class LlmChatClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", resolveModelName(model));
+        payload.put("max_tokens", llmProperties.getMaxTokens());
         payload.put("temperature", llmProperties.getTemperature() > 0 ? llmProperties.getTemperature() : 0.7);
         payload.put("messages", messages);
         payload.put("stream", stream);

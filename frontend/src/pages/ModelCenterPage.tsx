@@ -371,7 +371,7 @@ function AddModelModal({
       setFormData({
         modelName: m.modelName || m.name || '',
         description: m.description || '',
-        apiKey: m.apiKey || m.api_key || '',
+          apiKey: '',
         baseUrl: m.apiBaseUrl || m.api_base_url || '',
         provider: m.provider || '',
         configTemplate: inferredTemplate,
@@ -466,7 +466,7 @@ function AddModelModal({
         Object.assign(payload, {
           modelType: 'api', modelCategory: 'api',
           modelCode: finalApiModelId,
-          apiKey: formData.apiKey, apiBaseUrl: formData.baseUrl,
+          apiKey: formData.apiKey.trim() || undefined, apiBaseUrl: formData.baseUrl,
           provider: formData.provider,
           configTemplate: formData.configTemplate || undefined,
         });
@@ -1065,15 +1065,17 @@ function ModelDetailModal({
 }
 
 // ==================== 主页面组件 ====================
-export default function ModelCenterPage() {
+export function ModelCenterTabs({base}:{base:'/model'|'/model-config'}) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const isTemplatePage = location.pathname.includes('/template');
-  const activeTab = isTemplatePage ? 'template' : 'model';
-
-  const handleTabChange = (tab: 'model' | 'template') => {
-    navigate(tab === 'template' ? '/model-config/template' : '/model-config');
-  };
+  const active = useLocation().pathname.endsWith('/template') ? 'template' : 'model';
+  return <nav className="shrink-0 bg-white rounded-2xl shadow-sm border border-[#E2E8F0] p-1.5 inline-flex self-start">
+    {(['model','template'] as const).map(tab=><button key={tab} aria-current={active===tab?'page':undefined} onClick={()=>navigate(tab==='template'?`${base}/template`:base)} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${active===tab?'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md':'text-gray-500 hover:bg-gray-50'}`}>
+      {tab==='model'?<><Settings className="w-4 h-4"/>模型管理</>:<><FileCode className="w-4 h-4"/>指令模板管理</>}
+    </button>)}
+  </nav>;
+}
+export default function ModelCenterPage() {
+  const activeTab = useLocation().pathname.endsWith('/template') ? 'template' : 'model';
 
   // Modal 状态
   const [showAddModelModal, setShowAddModelModal] = useState(false);
@@ -1278,22 +1280,9 @@ export default function ModelCenterPage() {
   };
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 w-full gap-4 md:gap-5 animate-fade-in">
+    <div className="model-center-original flex flex-1 flex-col min-h-0 w-full gap-4 md:gap-5 animate-fade-in">
       {/* 选项卡 */}
-      <div className="shrink-0 bg-white rounded-2xl shadow-sm border border-[#E2E8F0] p-1.5 inline-flex self-start">
-        <button onClick={() => handleTabChange('model')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${
-            activeTab === 'model' ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
-          }`}>
-          <Settings className="w-4 h-4" />模型管理
-        </button>
-        <button onClick={() => handleTabChange('template')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${
-            activeTab === 'template' ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
-          }`}>
-          <FileCode className="w-4 h-4" />指令模板管理
-        </button>
-      </div>
+      <ModelCenterTabs base="/model"/>
 
       <div className="flex-1 min-h-0 overflow-auto">
         {activeTab === 'model' ? (

@@ -46,6 +46,18 @@ class DoctorVerificationIntegrationTest {
         mvc.perform(post(path+"/cancel").header("Authorization",patient.token())).andExpect(status().isOk());
         mvc.perform(get(path+"/records").header("Authorization",doctor.token())).andExpect(status().isNotFound());
     }
+    @Test void patientCanRepeatOneDoctorButCannotMixActiveDoctors() throws Exception {
+        var patient=account("user"); var first=account("doctor"); var second=account("doctor");
+        for(var d:java.util.List.of(first,second)) jdbc.update("INSERT INTO care_doctors(doctor_id) VALUES (?)",d.id());
+        for(var d:java.util.List.of(first,first,second)) book(patient,d,d==second?409:200);
+        jdbc.update("UPDATE care_appointments SET state='ACCEPTED' WHERE patient_id=?",patient.id());
+        book(patient,second,409);
+        jdbc.update("UPDATE care_appointments SET state='ENDED' WHERE patient_id=?",patient.id());
+        book(patient,second,200);
+    }
+    private void book(Account patient, Account doctor,int expected) throws Exception {
+        mvc.perform(post("/api/care/appointments").header("Authorization",patient.token()).contentType("application/json").content(mapper.writeValueAsBytes(Map.of("doctorId",doctor.id(),"scheduledAt",java.time.Instant.now().plusSeconds(86400).toString(),"snapshot",Map.of("posts",java.util.List.of(),"results",java.util.List.of()))))).andExpect(status().is(expected));
+    }
     private Account account(String role) throws Exception {
         String username = "verify_" + UUID.randomUUID().toString().replace("-", "").substring(0,12);
         String result = mvc.perform(post("/api/auth/register").contentType("application/json").content(mapper.writeValueAsString(Map.of("username",username,"password","VerifyTest42!","nickname","合成测试账号"))))

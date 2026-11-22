@@ -16,7 +16,7 @@ def serialized_emocc(fn):
             return fn(*args, **kwargs)
     return wrapped
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +42,7 @@ class InferRequest(BaseModel):
     posts: Optional[List[str]] = None
 
 class ReviewRequest(BaseModel):
+    model: Literal['emocc', 'fealearner'] = 'emocc'
     posts: List[str] = Field(...,min_length=1,max_length=32)
 
 class ProbeRequest(BaseModel):
@@ -66,7 +67,11 @@ def appointment_review(body:ReviewRequest):
     from fastapi import HTTPException
     if any(not t.strip() or len(t)>20000 for t in body.posts):raise HTTPException(422,'Invalid post')
     from services.appointment_review import review
-    try:return review(body.posts)
+    try:
+        if body.model == 'fealearner':
+            from services.appointment_fealearner import review as review_features
+            return review_features(body.posts)
+        return review(body.posts)
     except (ImportError,RuntimeError,OSError,ValueError,KeyError):raise HTTPException(503,'Local encoder or checkpoint unavailable')
 
 

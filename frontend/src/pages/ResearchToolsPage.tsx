@@ -11,7 +11,7 @@ async function call(path:string,body?:unknown) {
   if(!response.ok || !result.success) throw new Error(result.message || '请求失败');
   return result.data;
 }
-export default function ResearchToolsPage({mode, embedded=false}:{mode:'datasets'|'models'; embedded?:boolean}) {
+export default function ResearchToolsPage({mode, embedded=false,onInspect}:{mode:'datasets'|'models'; embedded?:boolean;onInspect?:(id:string,name:string)=>void}) {
   const { state } = useLocation();
   const [rows,setRows]=useState<Record<string,any>[]>([]); const [loading,setLoading]=useState(true);
   const [error,setError]=useState(''); const [query,setQuery]=useState(''); const [version,setVersion]=useState(0);
@@ -28,7 +28,7 @@ export default function ResearchToolsPage({mode, embedded=false}:{mode:'datasets
         {title:'数据集',dataIndex:'displayName',render:(value,row)=><div><strong>{value}</strong><p className="pro-muted">{row.datasetKey}</p></div>},
         {title:'语言',dataIndex:'language'}, {title:'标签体系',dataIndex:'classSystem'}, {title:'账号数',dataIndex:'totalUsers'}, {title:'贴文数',dataIndex:'totalPosts'},
         {title:'来源',dataIndex:'isBuiltin',render:value=><Tag>{value?'内置数据':'导入数据'}</Tag>},
-        {title:'说明',dataIndex:'description',ellipsis:true}, {title:'操作',render:(_,row)=><Link to={`/research-data?${new URLSearchParams({view:'archives',dataset:row.datasetKey})}`}>查看样本</Link>},
+        {title:'操作',render:(_,row)=><Button type="link" onClick={()=>onInspect?.(row.datasetKey,row.displayName)}>查看数据集</Button>},
       ]} /></section>
       :<div className="pro-split"><section className="pro-panel"><h2 className="pro-section-title" style={{marginTop:0}}>在线试用</h2>
         <p className="pro-muted">API / Ollama 模型接收文本，适合先检查输出，再进行批量分类评估。模型可选不代表服务一定在线，调用失败会明确提示。</p><label>选择模型</label><Select aria-label="选择试用模型" loading={loading} value={model} onChange={value=>{setModel(value);setConsent(false);setResult(null)}} disabled={running} style={{width:'100%',margin:'10px 0 20px'}} options={rows.map(row=>({value:row.id,label:`${row.modelName} · ${row.modelType}${row.supportsTrial?'':'（暂不支持文字试用）'}`,disabled:!row.supportsTrial}))} />

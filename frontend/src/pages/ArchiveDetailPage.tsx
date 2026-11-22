@@ -347,12 +347,19 @@ export default function ArchiveDetailPage() {
 
         let richPostPayload: any = null;
         try {
-          richPostPayload = await fetchCSVPUserPosts({
+          const first = await fetchCSVPUserPosts({
             datasetKey: datasetSource,
             userHash: archiveId,
             page: 1,
             pageSize: 500,
           });
+          const all = [...first.posts];
+          for (let page=2; all.length < first.total; page++) {
+            const next = await fetchCSVPUserPosts({datasetKey:datasetSource,userHash:archiveId,page,pageSize:500});
+            if (!next.posts.length) throw new Error('贴文分页不完整');
+            all.push(...next.posts);
+          }
+          richPostPayload = {...first,posts:all};
         } catch (error) {
           console.warn('加载帖子增强字段失败，回退基础详情接口:', error);
         }
@@ -399,8 +406,8 @@ export default function ArchiveDetailPage() {
         const sorted = [...loadedPosts].sort((a, b) => b.importanceScore - a.importanceScore);
         setSelectedPost(sorted[0] || null);
 
-        const keywords = await fetchCSVUserKeywords({ datasetKey: datasetSource, userHash: archiveId, topN: 8 });
-        setFrequentWords(keywords.keywords.map((k) => k.word));
+        const keywords = await fetchCSVUserKeywords({ datasetKey: datasetSource, userHash: archiveId, topN: 8 }).catch(()=>null);
+        setFrequentWords(keywords?.keywords.map((k) => k.word) ?? []);
       } catch (err) {
         console.error('Failed to load archive detail:', err);
         setPosts([]);
@@ -951,7 +958,7 @@ const chartUsesTimestamp = visiblePosts.some(post => hasUsableTimestamp(post));
                   <FileText className="w-4 h-4 text-[#2F6BFF]" />
                   帖子内容全文
                 </h4>
-                <p className="text-[#415168] leading-relaxed text-base bg-white rounded-xl p-4 border border-[#E2E8F0]">
+                <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}} className="text-[#415168] leading-relaxed text-base bg-white rounded-xl p-4 border border-[#E2E8F0]">
                   {renderHighlightedContent(selectedPost.content, selectedPost.evidenceDomains)}
                 </p>
                 {selectedPost.evidenceDomains && selectedPost.evidenceDomains.length > 0 && (

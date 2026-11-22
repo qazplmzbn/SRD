@@ -1,0 +1,37 @@
+/* Shared archive list surface. Keep scrolling and fixed columns with the table owner. */
+:root { --list-line:#dce4ee; --list-divider:#eaf0f6; --list-heading:#415168; --list-hover:#f7f9fc; --list-radius:16px; --list-header:linear-gradient(180deg,#fdeedc,#fbd9be); }
+@media screen {
+body table:not(.ant-table-wrapper table), body .ant-table-wrapper .ant-table-container {
+  border:1px solid var(--list-line); border-radius:var(--list-radius); background:white;
+  box-shadow:0 1px 3px rgba(15,23,42,.06);
+}
+body table:not(.ant-table-wrapper table) {border-collapse:separate;border-spacing:0;}
+body table thead tr th, body .ant-table-wrapper .ant-table-thead>tr>th {color:var(--list-heading);font-weight:600;background-color:transparent;border-bottom:1px solid var(--list-line);}
+body table thead tr:first-child>th:first-child {border-start-start-radius:var(--list-radius);}
+body table thead tr:first-child>th:last-child {border-start-end-radius:var(--list-radius);}
+body table tbody>tr:not(:last-child)>td, body .ant-table-wrapper .ant-table-tbody>tr>td {border-bottom:1px solid var(--list-divider);}
+body table tbody>tr:not([aria-selected=true]):hover, body .ant-table-wrapper .ant-table-tbody>tr>td.ant-table-cell-row-hover {background-color:var(--list-hover);}
+body .ant-table-wrapper .ant-table-cell-fix-left, body .ant-table-wrapper .ant-table-cell-fix-right {background-color:white;}
+
+/* An opaque fill also keeps scrolled rows from showing through fixed columns. */
+body table thead > tr {background:transparent !important;}
+body table thead > tr > th, body .ant-table-wrapper .ant-table-thead > tr > th {background:var(--list-header) !important;color:var(--list-heading);height:46px;padding-inline:16px;font-weight:600;}
+body .ant-table-wrapper .ant-table-thead > tr > th::before {display:none;}
+body table tbody > tr:last-child > td:first-child {border-end-start-radius:var(--list-radius);}
+body table tbody > tr:last-child > td:last-child {border-end-end-radius:var(--list-radius);}
+body table tbody > tr:only-child > td[colspan]:only-child:not(.ant-table-expanded-row-cell), body .ant-table-wrapper .ant-table-placeholder > td {height:100px;text-align:center;color:#64748b;}
+body .ant-table-wrapper .ant-table-placeholder .ant-empty {margin:12px 0;}
+body .ant-table-wrapper .ant-table-thead > tr:first-child > th:first-child {border-start-start-radius:var(--list-radius);}
+body .ant-table-wrapper .ant-table-thead > tr:first-child > th:last-child {border-start-end-radius:var(--list-radius);}
+body .ant-pagination, body .archive-pager {
+  display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:12px 16px;
+  margin:0; border-top:1px solid var(--list-line); border-radius:0 0 var(--list-radius) var(--list-radius);
+  background:linear-gradient(to right,#f7fafd,#fff); color:#64748b;
+}
+body .ant-table-wrapper .ant-table-pagination.ant-pagination {margin:0;}
+body .ant-pagination .ant-pagination-item, body .ant-pagination .ant-pagination-item-link,
+body .archive-pager button {background:white;border:1px solid var(--list-line);border-radius:8px;color:#415168;}
+body .ant-pagination .ant-pagination-item-active, body .archive-pager button[aria-current=page] {background:linear-gradient(to right,#2563eb,#1d4ed8);border-color:#2563eb;color:white;}
+body .ant-pagination .ant-pagination-item-active a {color:white;}
+body .ant-pagination .ant-pagination-disabled button, body .archive-pager button:disabled {opacity:.4;cursor:not-allowed;}
+}

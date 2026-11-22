@@ -931,6 +931,7 @@ export async function fetchRiskReport(taskId: string): Promise<{
     };
     symptomDescription?: string;
     emotionalAnalysis?: string;
+    knowledgeEvidence?: {id:string; title:string; snippet:string}[];
     riskInterpretation?: string;
     keyHighlight?: string;
     riskFactors?: string[];
@@ -2012,6 +2013,7 @@ export interface RiskPagePromptTemplate {
   id: string;
   name: string;
   taskType: string;
+  modelId?: number;
   description: string;
   content?: string;
   createdAt: string;
@@ -2063,6 +2065,7 @@ export async function fetchPromptTemplatesForRiskPage(): Promise<RiskPagePromptT
       id: String(t.id),
       name: t.name,
       taskType: t.taskType,
+      modelId: t.modelId,
       description: t.description || '',
       content: t.promptContent,
       createdAt: t.createdAt,
@@ -2206,6 +2209,7 @@ export interface EmoccTaskResult {
     fusionMethod: string;
     symptomDescription?: string;
     emotionalAnalysis?: string;
+    knowledgeEvidence?: {id:string; title:string; snippet:string}[];
     riskInterpretation?: string;
     keyHighlight?: string;
     riskFactors?: string[];

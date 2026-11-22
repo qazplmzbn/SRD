@@ -7,8 +7,6 @@ import time
 from math import log
 import numpy as np
 import scipy.sparse as sp
-from nltk.corpus import stopwords
-from stanfordcorenlp import StanfordCoreNLP
 from torch import Tensor, nn
 from tqdm import tqdm
 import pandas as pd

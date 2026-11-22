@@ -58,6 +58,7 @@ public class ResearchExperimentService {
         jdbc.queryForObject("SELECT id FROM app_users WHERE id=? FOR UPDATE",Long.class,owner);
         if(jdbc.queryForObject("SELECT COUNT(*) FROM research_experiments WHERE owner_id=? AND status IN ('QUEUED','RUNNING')",Long.class,owner)>=3) throw new BusinessException(HttpStatus.CONFLICT,"最多同时保留3个待完成实验");
         var version=versions.detail(input.versionId());
+        if(version.containsKey("table"))throw new BusinessException(HttpStatus.BAD_REQUEST,"通用表格未配置实验字段");
         JsonNode samples=(JsonNode)version.get("samples"); int total=0;
         for(var sample:samples) if("TEST".equals(sample.path("split").asText())) total++;
         if(total==0) throw new BusinessException(HttpStatus.BAD_REQUEST,"此版本没有测试集样本");

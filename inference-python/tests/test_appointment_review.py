@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from transformers import BertConfig, BertModel, BertTokenizerFast
-from services.appointment_review import review, models
+from services.appointment_review import review, models, bert_models
 
 
 class AppointmentReviewTest(unittest.TestCase):
@@ -17,10 +17,17 @@ class AppointmentReviewTest(unittest.TestCase):
             BertTokenizerFast(vocab_file=str(vocab)).save_pretrained(folder)
             BertModel(BertConfig(vocab_size=8,hidden_size=768,num_hidden_layers=1,num_attention_heads=12,intermediate_size=64)).save_pretrained(folder)
             models.cache_clear()
+            bert_models.cache_clear()
             try:
                 result = review(['早安','晚安'])
                 self.assertEqual(len(result['weights']),2)
                 self.assertAlmostEqual(sum(result['weights']),1,places=5)
                 self.assertIn(result['classIndex'],(0,1))
+                if os.environ.get('FEALEARNER_DICT_DIR'):
+                    from services.appointment_fealearner import review as fealearner_review
+                    result = fealearner_review(['早安','晚安'])
+                    self.assertEqual(result['model'], 'FeaLearner-Weibo')
+                    self.assertIn(result['classIndex'], (0, 1))
             finally:
                 models.cache_clear()
+                bert_models.cache_clear()
