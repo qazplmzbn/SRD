@@ -22,16 +22,19 @@ VIS4SRD 是一个面向心理健康服务与自杀风险识别场景的前后端
 | `scales/` | 心理量表 JSON 定义 |
 | `README.md`、`.gitignore` 等 | 说明与忽略规则 |
 
-首次下载请按下方「快速启动」操作。源码不包含可直接登录的账号或完整业务数据库；仅查看移动端浏览器界面可以先只启动前端。
+**第一次从 GitHub 下载？** 从[快速启动](#5-快速启动)开始，按用途选择：
+
+- **只看页面**：安装 Node.js，按 5.1 下载代码，只执行 5.3 的「终端二」，打开 <http://127.0.0.1:5173/mobile/index.html>。不需要 Java 或数据库；此时不能验证登录、预约等接口。
+- **注册、登录并使用业务功能**：准备 JDK、Maven、Node.js 和已初始化的 MySQL 业务库，依次执行 5.1 至 5.3，再按第 6 节验证。不需要先安装 Python、下载模型或配置地图。
 
 ### 1.2 未上传、但对完整运行很重要的目录
 
-以下内容因体积大或属于本地/个人资料，**默认不进 Git**。克隆后若缺这些目录，对应功能会不可用或降级。
+对照[忽略规则](.gitignore)，以下资源不会全部随源码下载。缺少可选资源时，只需为要使用的功能补齐对应项。
 
 | 目录 | 是否运行「必须」 | 影响功能 | 如何补齐 |
 |------|------------------|----------|----------|
 | `Emocc/` | **真实 Emocc 推理必须** | 侧车 Emocc 神经网络检测；无权重则只能启发式 | 按现有目录结构单独拷贝整目录（含 `.pth` / `.pkl` 等） |
-| `Fealeaner/` | **真实 FeaLearner 推理必须** | 侧车 FeaLearner 检测；无权重则只能启发式 | 单独同步模型与特征资源（权重文件已按扩展名忽略） |
+| `Fealeaner/` | **真实 FeaLearner 推理必须** | 有算法脚本不代表能加载模型 | 目录中的脚本已入库；另向维护者获取匹配的权重和特征资源（如 `*.pth`、`*.pkl`），按原相对路径放回 |
 | `datasets/` | **内置数据集 / 档案模板必须** | `POST /api/datasets/builtin/sync`、档案 CSV 模板等 | 单独同步到项目根 `datasets/`（配置默认 `../datasets`） |
 | `map_data/` | 可选（地图主要靠 PG） | 地图相关本地资源 / 离线数据 | 需要时单独同步；日常地图接口依赖 PostgreSQL |
 | `uploads/` | **运行时写入必须存在** | 档案上传、知识文档上传落盘 | 本地建空目录即可：`uploads/archives/`、`uploads/knowledge/`（可用 `.gitkeep`） |
@@ -94,6 +97,8 @@ cd SRD
 
 也可以在 [GitHub 仓库](https://github.com/qazplmzbn/SRD) 选择 **Code → Download ZIP** 并解压。下文的「项目根目录」指同时包含 `backend`、`frontend` 和 `scales` 的目录。
 
+**下载后没有 `node_modules`、`target`、`dist` 或 `.venv` 是正常的。** 这些目录被 Git 忽略，不要从别人的电脑复制：5.3 的 `npm.cmd ci` 安装前端依赖，Maven 启动时编译后端，Vite 开发模式不需要 `dist`；只有运行 5.4 的推理服务才需创建 `.venv`。首次安装依赖需要能访问相应的软件源。
+
 ### 5.2 准备 MySQL 和本机配置
 
 **已有可用业务库**：直接连接它，不必重新建库。**全新电脑**：先创建 `vis4srd` 库，再从项目维护者处取得与代码版本匹配的表结构和必要的非敏感初始化数据并恢复。仓库的 [`backend/src/main/resources/db/`](backend/src/main/resources/db/) 包含部分模块的建表脚本，不是完整业务库；只有空库时，即使健康检查通过，注册也可能报表不存在。请勿将真实患者记录、账号数据或密钥上传到 GitHub。
@@ -101,6 +106,7 @@ cd SRD
 从项目根目录执行：
 
 ```powershell
+New-Item -ItemType Directory -Force -Path 'uploads/archives','uploads/knowledge' | Out-Null
 cd backend
 $config = '.\src\main\resources\application-local.yml'
 if (-not (Test-Path $config)) { Copy-Item "$config.example" $config }
@@ -212,6 +218,8 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5173/api/health
 
 | 现象 | 处理 |
 |------|------|
+| `npm.cmd ci` 提示找不到锁文件，或 Maven 提示没有 POM | 检查当前目录：npm 在含 `package-lock.json` 的 `frontend/` 下执行，Maven 在含 `pom.xml` 的 `backend/` 下执行。ZIP 解压后可能还有一层目录。 |
+| 能打开页面，但 `/api` 请求失败 | 先直接访问 `http://127.0.0.1:8000/api/health`。若不通，检查后端终端的启动日志；若正常，再检查第 6 节的前端代理地址。 |
 | `8000` / `5173` 占用 | 释放进程，不要改端口 |
 | MySQL 报 `Access denied` | 检查本地配置的数据库账号、密码和权限；确认启用了 `local` profile |
 | 注册时报 `Table ... doesn't exist` | 检查 JDBC URL 指向的库及业务表结构；不能只建空库或仅执行模块增量脚本 |
