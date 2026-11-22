@@ -22,7 +22,7 @@ VIS4SRD 是一个面向心理健康服务与自杀风险识别场景的前后端
 | `scales/` | 心理量表 JSON 定义 |
 | `README.md`、`.gitignore` 等 | 说明与忽略规则 |
 
-克隆后即可跑通：**登录、档案、量表、知识库、聊天（需 LLM Key）、风险检测（启发式）** 等主流程（需 MySQL；地图另需 PostgreSQL）。
+首次下载请按下方「快速启动」操作。源码不包含可直接登录的账号或完整业务数据库；仅查看移动端浏览器界面可以先只启动前端。
 
 ### 1.2 未上传、但对完整运行很重要的目录
 
@@ -76,7 +76,7 @@ vis4srd/
 
 ## 4. 环境要求与端口
 
-- JDK 17+、Maven、Node.js（建议 18+）
+- JDK 17+、Maven、Node.js（建议 22 LTS，含 npm）、MySQL；使用 `git clone` 时还需 Git。
 - MySQL：`127.0.0.1:3306`，库名示例 `vis4srd`
 - PostgreSQL：地图功能；本地常用 SSH 隧道映射到 `127.0.0.1:5432`
 - **端口固定**：后端 `8000`、前端 `5173`、侧车 `8001`；被占用时先释放，不要改端口绕过
@@ -85,53 +85,70 @@ vis4srd/
 
 ## 5. 快速启动
 
-### 5.1 配置后端
+### 5.1 下载代码（Windows PowerShell）
 
-在 `backend/` 使用 `local` profile（见 `application.yml` / local 示例）。常用环境变量：
-
-```text
-PORT=8000
-DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME
-PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_NAME
-LLM_MODEL / LLM_API_KEY / LLM_BASE_URL
-KNOWLEDGE_ROOT_DIR=../knowledge
-KNOWLEDGE_UPLOAD_DIR=../uploads/knowledge
-ARCHIVE_UPLOAD_DIR=../uploads/archives
-DATASETS_DIR=../datasets
-PYTHON_INFERENCE_BASE_URL=http://127.0.0.1:8001
+```powershell
+git clone https://github.com/qazplmzbn/SRD.git
+cd SRD
 ```
 
+也可以在 [GitHub 仓库](https://github.com/qazplmzbn/SRD) 选择 **Code → Download ZIP** 并解压。下文的「项目根目录」指同时包含 `backend`、`frontend` 和 `scales` 的目录。
 
+### 5.2 准备 MySQL 和本机配置
 
-### 5.2 启动业务后端
+**已有可用业务库**：直接连接它，不必重新建库。**全新电脑**：先创建 `vis4srd` 库，再从项目维护者处取得与代码版本匹配的表结构和必要的非敏感初始化数据并恢复。仓库的 [`backend/src/main/resources/db/`](backend/src/main/resources/db/) 包含部分模块的建表脚本，不是完整业务库；只有空库时，即使健康检查通过，注册也可能报表不存在。请勿将真实患者记录、账号数据或密钥上传到 GitHub。
+
+从项目根目录执行：
 
 ```powershell
 cd backend
+$config = '.\src\main\resources\application-local.yml'
+if (-not (Test-Path $config)) { Copy-Item "$config.example" $config }
+notepad $config
+```
+
+按 [本机配置示例](backend/src/main/resources/application-local.yml.example) 填写以下字段：
+
+| 字段 | 如何填写 |
+|---|---|
+| `app.datasource.mysql.jdbc-url` | 按实际主机、端口和库名修改。若是本机 `3306/vis4srd`，示例 URL 可保持不变。 |
+| `app.datasource.mysql.username`、`password` | 填写能访问该业务库的 MySQL 账号及密码。当前主配置没有把这两个字段绑定到 `DB_USER`、`DB_PASSWORD`，仅设置这两个环境变量不会生效。 |
+| `app.jwt.secret` | 替换为自己生成的随机密钥，建议至少 32 字节。请保存在本机；更换后需重新登录。 |
+| `app.datasource.postgres` | 使用地图服务时配置 PostgreSQL 地址、账号和密码，并准备对应地图数据。 |
+
+### 5.3 启动后端和前端
+
+**终端一**：保持在上一步的 `backend` 目录，启用 `local` 配置启动后端，并保持终端运行。
+
+```powershell
 mvn spring-boot:run "-Dspring-boot.run.profiles=local"
 ```
 
-### 5.3启动推理
+**终端二**：在项目根目录打开新的 PowerShell，按锁文件安装依赖并启动前端。
 
-需已准备好 `Emocc/`、`Fealeaner/`：
+```powershell
+cd frontend
+npm.cmd ci
+npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
+```
+
+打开 [Web 注册](http://127.0.0.1:5173/register) 创建专业账号，再到 [Web 登录](http://127.0.0.1:5173/login) 登录。医生可在登录后进入「专业服务 → 医生认证」，使用管理员单独提供的邀请码；本机测试需在启动后端前设置 `DOCTOR_CERTIFICATION_INVITE_CODE`，不要将其提交到仓库。个人用户从[移动端浏览器预览](http://127.0.0.1:5173/mobile/index.html)进入，预约等联网功能仍需要业务后端。
+
+### 5.4 可选：启动本地模型推理
+
+在第三个终端，从项目根目录执行。按所用模型准备权重与特征资源（见 1.2 节）。研究者导入数据的 BERT 检测需要将 `RESEARCH_BERT_DIR` 设为本机预训练编码器目录；医生复核使用 `CARE_BERT_DIR` 和匹配的微博 EmoCC 权重。将变量设置在**启动 Python 的终端**，路径指向包含配置、词表和权重的实际目录。
 
 ```powershell
 cd inference-python
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-.\.venv\Scripts\python.exe -m uvicorn app:app --host 0.0.0.0 --port 8001
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8001
 ```
 
 健康检查：`http://127.0.0.1:8001/health`  
-不可用时，风险检测自动启发式回退。
+侧车不可用时，部分旧风险检测流程可按配置回退到启发式规则；研究 BERT 检测和医生模型复核需要真实编码器，不会生成模拟预测。使用外部大模型问答时另配 `LLM_API_KEY`、`LLM_MODEL` 和 `LLM_BASE_URL`。
 
-### 5.4 启动前端
-
-```powershell
-npm install --prefix frontend --registry=https://registry.npmmirror.com
-npm run dev --prefix frontend -- --host 0.0.0.0 --port 5173 --strictPort
-```
-
-### 5.5PostgreSQL SSH 隧道
+### 5.5 可选：PostgreSQL SSH 隧道（仅已有对应 SSH 配置时）
 
 ```powershell
 ssh -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 -N -L 5432:127.0.0.1:5432 vis4srd-server
@@ -155,7 +172,7 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5173/
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5173/api/health
 ```
 
-前端开发代理：`/api` → `http://localhost:8000`（见 `frontend/vite.config.ts`）。
+前端开发代理：`/api` → `http://localhost:8000`（见 `frontend/vite.config.ts`）。健康检查不能代替业务验证：用测试账号成功注册、登录并进入首页后，再验证地图、模型等可选功能。
 
 ---
 
@@ -164,13 +181,14 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5173/api/health
 | 路径 | 说明 |
 |------|------|
 | `/home` | 首页 |
-| `/archive` | 心理档案 |
-| `/risk` | 风险检测 |
-| `/scale` | 量表 |
+| `/research-data` | 研究数据、评估集和实验 |
+| `/model-analysis` | 风险检测 |
+| `/appointments`、`/care-users` | 医生预约管理与已获授权的用户资料 |
 | `/knowledge` | 知识库 |
 | `/chat` | AI 对话 |
 | `/map` | 援助地图 |
-| `/model` | 模型中心 |
+| `/model`、`/model/template` | 模型与提示词配置，按账号角色展示 |
+| `/mobile/index.html` | 移动端浏览器预览，不是 Android 安装包 |
 | `/profile` | 账号 |
 
 未登录默认跳转 `/login`。
@@ -195,6 +213,8 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5173/api/health
 | 现象 | 处理 |
 |------|------|
 | `8000` / `5173` 占用 | 释放进程，不要改端口 |
+| MySQL 报 `Access denied` | 检查本地配置的数据库账号、密码和权限；确认启用了 `local` profile |
+| 注册时报 `Table ... doesn't exist` | 检查 JDBC URL 指向的库及业务表结构；不能只建空库或仅执行模块增量脚本 |
 | 地图接口失败 | 检查 PostgreSQL / SSH 隧道是否仍为 `127.0.0.1:5432` |
 | 风险结果像「规则」而非模型 | 未起侧车或缺 `Emocc/` / `Fealeaner/` 权重，属预期回退 |
 | 内置数据集同步失败 | 确认项目根存在 `datasets/` 且路径配置正确 |
