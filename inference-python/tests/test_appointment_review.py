@@ -5,10 +5,18 @@ from pathlib import Path
 from unittest.mock import patch
 
 from transformers import BertConfig, BertModel, BertTokenizerFast
-from services.appointment_review import review, models, bert_models
+from services.appointment_review import review, models, bert_models, emoji_features
 
 
 class AppointmentReviewTest(unittest.TestCase):
+    def test_emoji_validation(self):
+        vocab = {'<UNK>':1,'😔':2}
+        ids, mask = emoji_features(['示例'], ['😔❤️🙂'], vocab)
+        self.assertEqual(ids[0,0,0].item(),2)
+        self.assertEqual(mask.sum().item(),4)
+        for invalid in ['😔🙂', '😔😔😔文字', '😔'*6]:
+            with self.assertRaises(ValueError):
+                emoji_features(['示例'],[invalid],vocab)
     def test_encoder_and_checkpoint_contract(self):
         # Random tiny encoder for shape/attention tests only, never for serving.
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, CARE_BERT_DIR=folder):
@@ -19,7 +27,7 @@ class AppointmentReviewTest(unittest.TestCase):
             models.cache_clear()
             bert_models.cache_clear()
             try:
-                result = review(['早安','晚安'])
+                result = review(['早安','晚安'],['🌞🙂🌻','🌙😌💤'])
                 self.assertEqual(len(result['weights']),2)
                 self.assertAlmostEqual(sum(result['weights']),1,places=5)
                 self.assertIn(result['classIndex'],(0,1))

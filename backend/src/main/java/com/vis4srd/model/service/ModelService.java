@@ -69,7 +69,7 @@ public class ModelService {
                            usage_count, last_used_at, avg_processing_time_ms,
                            created_at, updated_at
                     FROM models
-                    WHERE 1=1
+                    WHERE COALESCE(model_category,'') <> 'local_llm' AND COALESCE(model_type,'') <> 'ollama'
                     """);
             List<Object> params = new ArrayList<>();
             if (StringUtils.hasText(category)) {
@@ -124,6 +124,7 @@ public class ModelService {
     }
 
     public Map<String, Object> createModel(Map<String, Object> body) {
+        rejectLocalLlm(body);
         Map<String, Object> db = new LinkedHashMap<>();
         putIfPresent(db, "model_name", first(body, "modelName", "model_name"));
         Object code = first(body, "modelCode", "model_code");
@@ -180,6 +181,7 @@ public class ModelService {
     }
 
     public Map<String, Object> updateModel(long modelId, Map<String, Object> body) {
+        rejectLocalLlm(body);
         Map<String, Object> db = new LinkedHashMap<>();
         copyIfKey(body, "modelName", db, "model_name");
         copyIfKey(body, "modelCode", db, "model_code");
@@ -232,6 +234,10 @@ public class ModelService {
             throw new BusinessException(HttpStatus.NOT_FOUND, "模型不存在");
         }
         return model;
+    }
+
+    private void rejectLocalLlm(Map<String,Object> body) {
+        if ("local_llm".equals(first(body,"modelCategory","model_category")) || "ollama".equals(first(body,"modelType","model_type")) || "ollama".equals(body.get("provider"))) throw new BusinessException("不支持本地大模型");
     }
 
     public void deleteModel(long modelId) {
@@ -688,51 +694,7 @@ public class ModelService {
     }
 
     public Map<String, Object> callOllamaModel(Map<String, Object> modelConfig, String prompt, String systemPrompt) {
-        String modelName = asString(first(modelConfig, "ollama_model_name", "model_name"));
-        String baseUrl = asString(modelConfig.get("ollama_base_url"));
-        if (!StringUtils.hasText(baseUrl)) {
-            baseUrl = DEFAULT_OLLAMA_URL;
-        }
-        baseUrl = normalizeBaseUrl(baseUrl);
-        double temperature = toDouble(modelConfig.get("temperature"), 0.7);
-
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", modelName);
-        payload.put("prompt", (systemPrompt == null ? "" : systemPrompt) + "\n\n" + prompt);
-        payload.put("stream", false);
-        Map<String, Object> options = new LinkedHashMap<>();
-        options.put("temperature", temperature >= 0 ? temperature : 0.7);
-        options.put("num_predict", 512);
-        payload.put("options", options);
-
-        try {
-            RestTemplate rt = restTemplateBuilder
-                    .setConnectTimeout(Duration.ofSeconds(5))
-                    .setReadTimeout(Duration.ofSeconds(120))
-                    .build();
-            ResponseEntity<Map> resp = rt.postForEntity(baseUrl + "/api/generate", payload, Map.class);
-            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
-                Object reply = resp.getBody().get("response");
-                Map<String, Object> ok = new LinkedHashMap<>();
-                ok.put("success", true);
-                ok.put("response", reply == null ? "" : String.valueOf(reply).trim());
-                ok.put("model", modelName);
-                ok.put("model_type", "ollama");
-                return ok;
-            }
-            Map<String, Object> fail = new LinkedHashMap<>();
-            fail.put("success", false);
-            fail.put("error", "Ollama 调用失败: HTTP " + resp.getStatusCode().value());
-            fail.put("model", modelName);
-            return fail;
-        } catch (RestClientException ex) {
-            log.warn("Ollama 调用失败（上游详情不写入日志）");
-            Map<String, Object> fail = new LinkedHashMap<>();
-            fail.put("success", false);
-            fail.put("error", "Ollama 调用失败: " + ex.getMessage());
-            fail.put("model", modelName);
-            return fail;
-        }
+        throw new BusinessException("本地大模型已停用");
     }
 
     public Map<String, Object> callApiModel(Map<String, Object> modelConfig, String prompt, String systemPrompt) {

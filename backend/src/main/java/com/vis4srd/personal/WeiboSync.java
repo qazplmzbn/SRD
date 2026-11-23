@@ -23,6 +23,10 @@ import java.util.*;
 @RestController @RequestMapping("/api/me/sync/weibo")
 class WeiboSync {
     private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(WeiboSync.class);
+    private static final int PAGE_SIZE=20;
+    private static final int INITIAL_PAGE_LIMIT=20;
+    private static final Duration INITIAL_LOOKBACK=Duration.ofDays(90);
+    private static final DateTimeFormatter WEIBO_DATE=DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss Z yyyy",Locale.ENGLISH);
     private final JdbcTemplate db;private final WeiboGateway gateway;private final TransactionTemplate tx;
     @Value("${WEIBO_SYNC_INTERVAL_SECONDS:300}") private int interval=300;
     WeiboSync(@Qualifier("mysqlJdbcTemplate") JdbcTemplate db,WeiboGateway gateway,@Qualifier("mysqlTransactionManager") PlatformTransactionManager manager){this.db=db;this.gateway=gateway;tx=new TransactionTemplate(manager);}
@@ -63,14 +67,28 @@ class WeiboSync {
             String access=WeiboGateway.required(credential,"access_token");Set<String> flags=new HashSet<>();credential.path("flags").forEach(f->flags.add(f.asText()));
             if(flags.isEmpty()){flags.addAll(gateway.flags(access));var a=((ObjectNode)credential).putArray("flags");flags.forEach(a::add);db.update("UPDATE weibo_connections SET credentials=? WHERE owner_id=?",gateway.seal(id,credential),id);}
             int page=((Number)r.get("page_no")).intValue();String cursor=(String)r.get("page_cursor");boolean initial=!Boolean.TRUE.equals(r.get("initial_done"))&&!"1".equals(String.valueOf(r.get("initial_done")));
-            Map<String,Object> args=new HashMap<>();if(flags.contains("uid"))args.put("uid",uid);if(flags.contains("count"))args.put("count",20);
-            if(flags.contains("cursor"))args.put("cursor",cursor);else if(flags.contains("page"))args.put("page",page);
+            if(initial&&page>INITIAL_PAGE_LIMIT){
+                db.update("UPDATE weibo_connections SET page_no=1,page_cursor='0',initial_done=true,next_run=?,status='CURRENT' WHERE owner_id=?",now+1000L*Math.max(60,interval),id);
+                return;
+            }
+            boolean cursorPaging=flags.contains("cursor");
+            Map<String,Object> args=new HashMap<>();if(flags.contains("uid"))args.put("uid",uid);if(flags.contains("count"))args.put("count",PAGE_SIZE);
+            if(cursorPaging)args.put("cursor",cursor);else if(flags.contains("page"))args.put("page",page);
             if(flags.contains("isGetLongText"))args.put("isGetLongText",1);
             var response=gateway.timeline(access,args);var posts=response.path("statuses");if(!posts.isArray())throw new IllegalStateException("invalid timeline");
             for(var p:posts){var author=p.path("user");if(!uid.equals(author.path("idstr").asText(author.path("id").asText()))||p.path("idstr").asText().isBlank())throw new IllegalStateException("unverified post");}
-            int inserted=0;for(var p:posts)if(store(id,uid,p,now))inserted++;
-            String next=response.path("next_cursor").asText("0");boolean more=initial&&posts.size()>0&&page<200&&(flags.contains("cursor")?!next.equals("0")&&!next.equals(cursor):flags.contains("page")&&(inserted>0||page==1));
-            db.update("UPDATE weibo_connections SET page_no=?,page_cursor=?,initial_done=?,last_success=?,next_run=?,status=? WHERE owner_id=?",more?page+1:1,more?next:"0",!more,now,now+(more?5000:1000L*Math.max(60,interval)),more?"SYNCING":"CURRENT",id);
+            Instant cutoff=Instant.ofEpochMilli(now).minus(INITIAL_LOOKBACK);
+            boolean allOlder=!posts.isEmpty();
+            for(var p:posts){
+                Instant published=publishedAt(p);
+                boolean older=published!=null&&published.isBefore(cutoff);
+                allOlder&=older;
+                if(!initial||(!older&&published!=null))store(id,uid,p,published,now);
+            }
+            String next=response.path("next_cursor").asText("").trim();
+            boolean more=initial&&!posts.isEmpty()&&!allOlder&&page<INITIAL_PAGE_LIMIT
+                    &&hasNextPage(response,flags,cursor,next,posts.size());
+            db.update("UPDATE weibo_connections SET page_no=?,page_cursor=?,initial_done=?,last_success=?,next_run=?,status=? WHERE owner_id=?",more?page+1:1,more&&cursorPaging?next:"0",!more,now,now+(more?5000:1000L*Math.max(60,interval)),more?"SYNCING":"CURRENT",id);
         }catch(WeiboGateway.Failure e){
             if(pending&&(e.code.equals("authorization_pending")||e.code.equals("slow_down"))){int poll=((Number)r.get("poll_seconds")).intValue()+(e.code.equals("slow_down")?5:0);db.update("UPDATE weibo_connections SET next_run=?,poll_seconds=? WHERE owner_id=?",now+1000L*poll,poll,id);}
             else if(e.status==401||Set.of("access_denied","expired_token","invalid_grant").contains(e.code))reauthorize(id);
@@ -78,15 +96,34 @@ class WeiboSync {
             else throw e;
         }catch(Exception e){throw new IllegalStateException("Weibo sync failed",e);}
     });}
+    private static boolean hasNextPage(JsonNode response,Set<String> flags,String cursor,String next,int size){
+        String hasMore=response.path("has_more").asText("");
+        boolean explicitEnd="false".equalsIgnoreCase(hasMore)||"0".equals(hasMore);
+        if(explicitEnd)return false;
+        if(flags.contains("cursor"))return !next.isEmpty()&&!"0".equals(next)&&!next.equals(cursor);
+        if(!flags.contains("page"))return false;
+        if("true".equalsIgnoreCase(hasMore)||"1".equals(hasMore))return true;
+        if(!next.isEmpty())return !"0".equals(next);
+        // A short page only signals the end when we know the requested page size.
+        return !flags.contains("count")||size>=PAGE_SIZE;
+    }
+
+    private static Instant publishedAt(JsonNode post){
+        String date=post.path("created_at").asText();
+        try{return ZonedDateTime.parse(date,WEIBO_DATE).toInstant();}
+        catch(java.time.format.DateTimeParseException e){
+            try{return Instant.parse(date);}catch(java.time.format.DateTimeParseException ignored){return null;}
+        }
+    }
+
     private void reauthorize(long id){db.update("UPDATE weibo_connections SET credentials='',status='REAUTHORIZE',next_run=? WHERE owner_id=?",Long.MAX_VALUE,id);}
-    private boolean store(long owner,String uid,JsonNode p,long now)throws Exception{
+    private void store(long owner,String uid,JsonNode p,Instant published,long now)throws Exception{
         String item=WeiboGateway.required(p,"idstr"), hash=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(("weibo:"+uid+":"+item).getBytes(StandardCharsets.UTF_8)));
         var existing=db.queryForList("SELECT id FROM personal_posts WHERE owner_id=? AND content_hash=?",String.class,owner,hash);
         String id=existing.isEmpty()?UUID.randomUUID().toString():existing.get(0);String text=p.path("longText").path("longTextContent").asText(p.path("text").asText());
-        Timestamp published=null;String date=p.path("created_at").asText();try{published=Timestamp.from(ZonedDateTime.parse(date,DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss Z yyyy",Locale.ENGLISH)).toInstant());}catch(java.time.format.DateTimeParseException e){try{published=Timestamp.from(Instant.parse(date));}catch(java.time.format.DateTimeParseException ignored){}}
-        db.update("INSERT INTO personal_posts VALUES(?,?,?,'微博同步',?,?,?) ON DUPLICATE KEY UPDATE content=VALUES(content),published_at=VALUES(published_at)",id,owner,text,published,new Timestamp(now),hash);
+        db.update("INSERT INTO personal_posts VALUES(?,?,?,'微博同步',?,?,?) ON DUPLICATE KEY UPDATE content=VALUES(content),published_at=VALUES(published_at)",id,owner,text,published==null?null:Timestamp.from(published),new Timestamp(now),hash);
         db.update("INSERT INTO social_post_details VALUES(?,?,?) ON DUPLICATE KEY UPDATE metadata=VALUES(metadata)",id,item,p.toString());
         var metrics=JsonNodeFactory.instance.objectNode();for(String k:List.of("comments_count","reposts_count","attitudes_count")){var n=p.path(k);if(n.isIntegralNumber()&&n.canConvertToLong()&&n.asLong()>=0)metrics.set(k,n);}
-        if(!metrics.isEmpty()&&db.queryForList("SELECT sampled_at FROM social_post_metrics WHERE post_id=? AND sampled_at>? LIMIT 1",Long.class,id,now-86400000).isEmpty())db.update("INSERT INTO social_post_metrics VALUES(?,?,?)",id,now,metrics.toString());return existing.isEmpty();
+        if(!metrics.isEmpty()&&db.queryForList("SELECT sampled_at FROM social_post_metrics WHERE post_id=? AND sampled_at>? LIMIT 1",Long.class,id,now-86400000).isEmpty())db.update("INSERT INTO social_post_metrics VALUES(?,?,?)",id,now,metrics.toString());
     }
 }

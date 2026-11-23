@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties("app.scenes")
 @Data
 public class SceneModels {
-    private int ollamaPort;
     private String reportModel, petModel, mobileModel;
     private int reportMaxTokens, petMaxTokens, mobileMaxTokens;
     private double reportTemperature, petTemperature, mobileTemperature;

@@ -94,7 +94,7 @@ export default function ResearchExperimentsPage() {
       { title: '进度', width: 170, render: (_, row) => <><Progress percent={Math.round(row.completed / row.total * 100)} showInfo={false} status={row.status === 'FAILED' ? 'exception' : undefined} />{row.completed} / {row.total}</> },
       { title: '创建时间', render: (_, row) => new Date(row.createdAt).toLocaleString() }, { title: '操作', render: (_, row) => <Button onClick={() => { setDetail(undefined); setFilter('errors'); setSelectedId(row.id); }}>查看结果</Button> },
     ]} /><Pagination current={page} total={total} pageSize={20} showSizeChanger={false} onChange={setPage} style={{ marginTop: 20 }} />
-      <p className="pro-muted" style={{ marginTop: 16 }}>仅评估 TEST 样本。实验仅对创建者开放，并持续检查数据版本授权。当前支持 API / Ollama 文本模型。</p></section>
+      <p className="pro-muted" style={{ marginTop: 16 }}>仅评估 TEST 样本。实验仅对创建者开放，并持续检查数据版本授权。当前支持 大模型。</p></section>
     <Modal title="实验对比" width={1100} open={compareOpen} onCancel={() => setCompareOpen(false)} footer={null}>
       {compareError ? <Alert type="error" message={compareError} /> : !comparison.length ? <p>正在读取并核对实验条件…</p> : <Space direction="vertical" size={18} style={{ width: '100%' }}>
         <Alert type={comparison.some(v => v.status !== 'SUCCEEDED' || v.metrics.coverage !== 1) ? 'warning' : 'info'} message={comparison.some(v => v.status !== 'SUCCEEDED' || v.metrics.coverage !== 1) ? '包含未完整成功的实验：各实验有效样本可能不同，请勿仅按F1判断优劣。' : '测试集内容及评估协议一致，可结合误报与漏报比较结果。'} description="运行中显示阶段指标；调用失败不作为标签0。此处不自动排名，也不代表临床诊断效果。" />

@@ -2,7 +2,18 @@
 # 启动示例：
 #   mvn spring-boot:run -Dspring-boot.run.profiles=local
 
+CARE_ALLOW_EXTERNAL_MODELS: false # 仅在允许向外部服务发送预约贴文时开启
 app:
+  # 医生预约检测的云端报告与 Emocc 逐帖表情生成共用此配置。
+  llm:
+    model: ${LLM_MODEL:qwen-flash}
+    base-url: ${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    api-key: ${LLM_API_KEY:}
+  # 下列三个场景共用 app.llm.base-url 和 api-key，模型 ID 可分别指定。
+  scenes:
+    report-model: ${REPORT_MODEL:${LLM_MODEL:qwen-flash}}
+    pet-model: ${PET_MODEL:${LLM_MODEL:qwen-flash}}
+    mobile-model: ${MOBILE_CHAT_MODEL:${LLM_MODEL:qwen-flash}}
   datasource:
     mysql:
       jdbc-url: jdbc:mysql://127.0.0.1:3306/vis4srd?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false

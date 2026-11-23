@@ -35,7 +35,7 @@ public class ResearchExperimentService {
     }
     private Map<String,Object> config(long id) {
         var value=models.getModelForInference(id);
-        if(value==null || !List.of("api","ollama").contains(Objects.toString(value.get("model_type"),""))) throw new BusinessException(HttpStatus.BAD_REQUEST,"请选择已启用的API或Ollama文本模型");
+        if(value==null || !"api".equals(value.get("model_type"))) throw new BusinessException(HttpStatus.BAD_REQUEST,"请选择已启用的大模型");
         var copy=new HashMap<>(value);
         // Use a fixed sampling parameter for this protocol; credentials stay only in server memory.
         copy.put("temperature",0.0);
@@ -130,7 +130,7 @@ public class ResearchExperimentService {
                 if(!mayRun(id,owner)) {finish(id,"FAILED","数据授权或账号权限已失效");return;}
                 long start=System.nanoTime();Integer predicted=null;String response="",error=null;
                 try {
-                    var output="api".equals(config.get("model_type"))?models.callApiModel(config,sample.path("text").asText(),prompt):models.callOllamaModel(config,sample.path("text").asText(),prompt);
+                var output=models.callApiModel(config,sample.path("text").asText(),prompt);
                     if(!Boolean.TRUE.equals(output.get("success"))) error="模型调用失败";
                     else {
                         response=Objects.toString(output.get("response"),"");

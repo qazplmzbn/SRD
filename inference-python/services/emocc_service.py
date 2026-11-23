@@ -1,64 +1,87 @@
 """
 Emocc模型推理服务
-基于 BERT + Emoji 双模态层次融合模型进行自杀风险检测
-支持输出每个帖子的注意力分数
+基于 BERT + Emoji 双模态层次融合模型进行风险检测
+支持输出每个帖子的注意力分数。
+
+说明：
+1. 不在模块导入阶段固定导入 Reddit 的 Emocc_model。
+2. 在 load_model(dataset_key=...) 时，按数据集绝对路径独立加载 model.py 和 emoji_utils.py。
+3. 保留原有 BertEmojiModelWithAttention 的参数命名，确保可以加载现有训练权重。
 """
-import os
+
+import importlib.util
 import sys
-import json
-import pickle
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Optional, Any, Tuple
-from pathlib import Path
-from dataclasses import dataclass
 
-# Emocc 各数据集代码在 Emocc/<dataset>/Emocc_model
-def _ensure_emocc_import_path(dataset_key: str = "reddit") -> Path:
-    root = Path(__file__).resolve().parents[2] / "Emocc" / (dataset_key or "reddit")
-    model_path = root / "Emocc_model"
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    if str(model_path) not in sys.path:
-        sys.path.insert(0, str(model_path))
-    return root
 
-_ensure_emocc_import_path("reddit")
+def _project_root() -> Path:
+    """
+    inference-python/services/emocc_service.py
+    parents[0] = services
+    parents[1] = inference-python
+    parents[2] = project root
+    """
+    return Path(__file__).resolve().parents[2]
 
-# 导入Emocc模型组件
-try:
-    from Emocc_model.model import (
-        TemporalAttention,
-        AdaptiveGateFusion,
-        MultiLayerPerceptron,
-        GlobalSelfAttention,
-        BertEmojiModel
-    )
-    from Emocc_model.utils.emoji_utils import get_emoji_vocabulary, load_pretrained_emoji_weights
-except ImportError as e:
-    print(f"[EmoccService] 导入Emocc模型失败: {e}")
-    BertEmojiModel = None
-    get_emoji_vocabulary = None
-    load_pretrained_emoji_weights = None
+
+def _load_module_from_file(module_name: str, file_path: Path):
+    """
+    从指定文件独立加载模块。
+
+    不使用 Emocc_model.model 这种相同的顶层模块名，
+    避免 Reddit / Weibo 因 sys.modules 缓存而串用。
+    """
+    file_path = Path(file_path).resolve()
+
+    if not file_path.is_file():
+        raise FileNotFoundError(f"模块文件不存在: {file_path}")
+
+    # 如果同一数据集模块已加载，且路径一致，则复用。
+    cached = sys.modules.get(module_name)
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        if cached_file and Path(cached_file).resolve() == file_path:
+            return cached
+        sys.modules.pop(module_name, None)
+
+    spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法创建模块加载器: {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+
+    return module
 
 
 @dataclass
 class EmoccInferenceResult:
-    """Emocc推理结果"""
+    """Emocc 推理结果。"""
     user_hash: str
-    risk_level: str  # high/medium/low
-    risk_score: float  # 0-1
-    risk_class: int  # 0-4 五分类
+    risk_level: str
+    risk_score: float
+    risk_class: int
     confidence: float
-    post_attention_scores: List[Dict[str, Any]]  # 每个帖子的注意力分数
+    post_attention_scores: List[Dict[str, Any]]
     model_info: Dict[str, Any]
 
 
 @dataclass
 class ModelArgs:
-    """模型参数"""
+    """推理模型参数；实际类别数由数据集配置决定。"""
     dropout: float = 0.5
     gru_size: int = 128
     class_num: int = 5
@@ -66,10 +89,15 @@ class ModelArgs:
 
 class GlobalSelfAttentionWithScores(nn.Module):
     """
-    扩展的GlobalSelfAttention，输出每个帖子的注意力分数
+    与训练模型 GlobalSelfAttention 计算保持一致，
+    额外返回每条帖子对应的注意力分数。
+
+    注意：这里保留 W_Q / W_K / W_V 的命名和维度，
+    使其 state_dict 与训练权重兼容。
     """
-    def __init__(self, input_dim, hidden_dim=None):
-        super(GlobalSelfAttentionWithScores, self).__init__()
+
+    def __init__(self, input_dim: int, hidden_dim: Optional[int] = None):
+        super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim or input_dim
 
@@ -88,333 +116,615 @@ class GlobalSelfAttentionWithScores(nn.Module):
         nn.init.zeros_(self.W_K.bias)
         nn.init.zeros_(self.W_V.bias)
 
-    def forward(self, x, mask=None, return_scores=False):
-        B, T, d = x.size()
+    def forward(self, x, mask=None, return_scores: bool = False):
+        batch_size, seq_len, _ = x.size()
 
-        Q = self.W_Q(x)
-        K = self.W_K(x)
-        V = self.W_V(x)
+        q = self.W_Q(x)
+        k = self.W_K(x)
+        v = self.W_V(x)
 
-        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / self.scale
 
         if mask is not None:
-            attn_mask = mask.unsqueeze(1)
-            attn_scores = attn_scores.masked_fill(attn_mask == 0, -1e9)
+            # 屏蔽无效帖子作为 key 的位置。
+            key_mask = mask.unsqueeze(1)
+            attn_scores = attn_scores.masked_fill(key_mask == 0, -1e9)
 
         attn_weights = F.softmax(attn_scores, dim=-1)
-        V_common = torch.matmul(attn_weights, V)
+        v_common = torch.matmul(attn_weights, v)
 
         if mask is not None:
-            mask_float = mask.unsqueeze(-1).type_as(V_common)
-            V_common = V_common * mask_float
+            query_mask = mask.unsqueeze(-1).to(dtype=v_common.dtype)
+            v_common = v_common * query_mask
 
-        V_common = V_common.sum(dim=1)
-        
-        # 返回注意力分数用于分析
-        if return_scores:
-            # attn_weights: (B, T, T) - 每个帖子对所有帖子的注意力
-            # 我们取对角线元素作为每个帖子自己的重要性权重
-            queries = mask.to(attn_weights.dtype) if mask is not None else torch.ones_like(attn_weights[:, :, 0])
-            post_scores = (attn_weights * queries.unsqueeze(-1)).sum(1) / queries.sum(1, keepdim=True).clamp_min(1)
-            return V_common, post_scores
-        
-        return V_common
+        # 与训练版 GlobalSelfAttention 一样，对时间维求和。
+        v_common = v_common.sum(dim=1)
+
+        if not return_scores:
+            return v_common
+
+        # 对有效 query 的注意力分布取平均，得到每条帖子的重要性分数。
+        if mask is None:
+            queries = torch.ones(
+                batch_size, seq_len,
+                dtype=attn_weights.dtype,
+                device=attn_weights.device
+            )
+        else:
+            queries = mask.to(dtype=attn_weights.dtype, device=attn_weights.device)
+
+        post_scores = (
+            attn_weights * queries.unsqueeze(-1)
+        ).sum(dim=1) / queries.sum(dim=1, keepdim=True).clamp_min(1.0)
+
+        return v_common, post_scores
 
 
 class BertEmojiModelWithAttention(nn.Module):
     """
-    扩展的BertEmojiModel，支持输出每个帖子的注意力分数
-    
-    架构流程：
-    1. Text Encoding Layer (GRU1): BERT嵌入(768维) → Post-level BiGRU1(768 → 2H)
-    2. Emoji Fusion Layer: GRU1输出(2H) + Emoji均值池化(300维) → 拼接(2H+300维)
-    3. Feature Extraction: GlobalSelfAttention 计算每个帖子的重要性权重
-    4. 输出: 分类logits + 帖子注意力分数
+    SRD 推理包装模型。
+
+    保留训练权重所需的参数名称：
+      emoji_embed
+      gru1
+      global_attention
+      adaptive_gate_fusion
+      class_fc
+
+    global_attention 使用可返回 attention score 的同构实现。
+    AdaptiveGateFusion 与 MLP 从当前 dataset 的 model.py 注入。
     """
-    def __init__(self, args, emoji_vocab_size, device, 
-                 emoji_weights=None, is_pretrain_emoji=False):
-        super(BertEmojiModelWithAttention, self).__init__()
+
+    def __init__(
+        self,
+        args,
+        emoji_vocab_size: int,
+        device,
+        emoji_weights=None,
+        is_pretrain_emoji: bool = False,
+        adaptive_gate_fusion_cls=None,
+        mlp_cls=None,
+    ):
+        super().__init__()
+
+        if adaptive_gate_fusion_cls is None:
+            raise RuntimeError("未传入当前数据集的 AdaptiveGateFusion")
+        if mlp_cls is None:
+            raise RuntimeError("未传入当前数据集的 MultiLayerPerceptron")
+
         self.args = args
-        self.device = device
+        self.device = torch.device(device)
         self.dropout = args.dropout
         self.gru_size = args.gru_size
         self.class_num = args.class_num
         self.bert_dim = 768
         self.emoji_dim = 300
-        
+
         if is_pretrain_emoji and emoji_weights is not None:
-            self.emoji_embed = nn.Embedding.from_pretrained(emoji_weights, freeze=False)
+            if tuple(emoji_weights.shape) != (emoji_vocab_size, self.emoji_dim):
+                raise ValueError(
+                    "Emoji2Vec 权重形状不匹配："
+                    f"期望 {(emoji_vocab_size, self.emoji_dim)}，"
+                    f"实际 {tuple(emoji_weights.shape)}"
+                )
+            self.emoji_embed = nn.Embedding.from_pretrained(
+                emoji_weights, freeze=False
+            )
         else:
-            self.emoji_embed = nn.Embedding(emoji_vocab_size, self.emoji_dim)
-        
+            self.emoji_embed = nn.Embedding(
+                emoji_vocab_size, self.emoji_dim
+            )
+
         self.emoji_embed_drop = nn.Dropout(args.dropout)
-        
+
         self.gru1 = nn.GRU(
             input_size=self.bert_dim,
             hidden_size=self.gru_size,
             num_layers=1,
             bidirectional=True,
-            batch_first=True
+            batch_first=True,
         )
         self.gru1_drop = nn.Dropout(args.dropout)
-        
-        # 使用支持注意力分数输出的GlobalSelfAttention
+
         self.global_attention = GlobalSelfAttentionWithScores(
             input_dim=2 * self.gru_size + self.emoji_dim,
-            hidden_dim=2 * self.gru_size
+            hidden_dim=2 * self.gru_size,
         )
-        
-        self.adaptive_gate_fusion = AdaptiveGateFusion(2 * self.gru_size)
-        
-        self.class_fc = MultiLayerPerceptron(
+
+        self.adaptive_gate_fusion = adaptive_gate_fusion_cls(
+            2 * self.gru_size
+        )
+
+        self.class_fc = mlp_cls(
             input_dim=2 * self.gru_size,
-            embed_dims=[2 * self.gru_size, self.gru_size, self.gru_size // 2],
+            embed_dims=[
+                2 * self.gru_size,
+                self.gru_size,
+                self.gru_size // 2,
+            ],
             dropout=self.dropout,
-            class_num=self.class_num
+            class_num=self.class_num,
         )
-        
+
         self._init_weights()
-    
+
     def _init_weights(self):
+        # 仅初始化 GRU；随后会加载训练 checkpoint 覆盖对应参数。
         for name, param in self.gru1.named_parameters():
             if "weight" in name:
                 nn.init.xavier_uniform_(param)
 
-    def forward(self, bert_embeddings, emoji_ids, post_masks, emoji_masks, return_attention=False):
-        """
-        Args:
-            bert_embeddings: (B, T, 768) BERT嵌入
-            emoji_ids: (B, T, E) Emoji ID序列
-            post_masks: (B, T) 帖子有效mask
-            emoji_masks: (B, T, E) Emoji有效mask
-            return_attention: 是否返回每个帖子的注意力分数
-        
-        Returns:
-            如果 return_attention=True: (logits, attention_scores)
-            否则: logits
-        """
-        import torch.nn.functional as F
-        
-        B, T, _ = bert_embeddings.size()
-        
-        post_lengths = post_masks.sum(dim=1).cpu()
+    def forward(
+        self,
+        bert_embeddings,
+        emoji_ids,
+        post_masks,
+        emoji_masks,
+        return_attention: bool = False,
+    ):
+        batch_size, total_posts, _ = bert_embeddings.size()
+
+        post_lengths = post_masks.sum(dim=1).to(dtype=torch.long).cpu()
         non_zero_indices = (post_lengths > 0).nonzero(as_tuple=True)[0]
+
         if len(non_zero_indices) == 0:
+            empty_logits = bert_embeddings.new_zeros(
+                batch_size, self.class_num
+            )
+            empty_attention = bert_embeddings.new_zeros(
+                batch_size, total_posts
+            )
             if return_attention:
-                return torch.zeros(B, self.class_num, device=self.device), torch.zeros(B, T, device=self.device)
-            return torch.zeros(B, self.class_num, device=self.device)
-        
+                return empty_logits, empty_attention
+            return empty_logits
+
         valid_bert = bert_embeddings[non_zero_indices]
         valid_lengths = post_lengths[non_zero_indices]
-        
+
         packed_bert = nn.utils.rnn.pack_padded_sequence(
-            valid_bert, valid_lengths, batch_first=True, enforce_sorted=False
+            valid_bert,
+            valid_lengths,
+            batch_first=True,
+            enforce_sorted=False,
         )
         gru1_output, _ = self.gru1(packed_bert)
-        gru1_output, _ = nn.utils.rnn.pad_packed_sequence(gru1_output, batch_first=True)
+        gru1_output, _ = nn.utils.rnn.pad_packed_sequence(
+            gru1_output,
+            batch_first=True,
+        )
         gru1_output = self.gru1_drop(gru1_output)
-        
+
         emoji_embeds = self.emoji_embed(emoji_ids)
         emoji_embeds = self.emoji_embed_drop(emoji_embeds)
-        
-        emoji_mask_expanded = emoji_masks.unsqueeze(-1).float()
-        emoji_embeds_masked = emoji_embeds * emoji_mask_expanded
-        emoji_counts = emoji_masks.sum(dim=-1, keepdim=True).clamp(min=1)
-        emoji_mean = emoji_embeds_masked.sum(dim=2) / emoji_counts
-        
-        max_len = int(valid_lengths.max().item())
-        if max_len <= 0:
-            max_len = 1
-        valid_emoji = emoji_mean[non_zero_indices][:, :max_len, :]
-        
-        fused_features = torch.cat([gru1_output, valid_emoji], dim=-1)
-        
-        valid_post_masks = post_masks[non_zero_indices][:, :max_len]
-        
-        last_indices = (valid_post_masks.cumsum(dim=1) == valid_post_masks.sum(dim=1, keepdim=True)).float()
-        V_short_valid = (gru1_output * last_indices.unsqueeze(-1)).sum(dim=1)
-        
-        # 获取注意力分数
-        V_common_valid, post_attn_scores_valid = self.global_attention(
-            fused_features, mask=valid_post_masks, return_scores=True
+
+        emoji_mask_expanded = emoji_masks.unsqueeze(-1).to(
+            dtype=emoji_embeds.dtype
         )
-        
-        V_short = torch.zeros(B, 2 * self.gru_size, device=self.device)
-        V_short[non_zero_indices] = V_short_valid
-        
-        V_common = torch.zeros(B, 2 * self.gru_size, device=self.device)
-        V_common[non_zero_indices] = V_common_valid
-        
-        # 处理注意力分数
-        post_attn_scores = torch.zeros(B, T, device=self.device)
-        post_attn_scores[non_zero_indices, :post_attn_scores_valid.size(1)] = post_attn_scores_valid
-        
-        V_final = self.adaptive_gate_fusion(V_short, V_common)
-        
-        logits = self.class_fc(V_final)
-        
+        emoji_embeds_masked = emoji_embeds * emoji_mask_expanded
+        emoji_counts = emoji_masks.sum(
+            dim=-1, keepdim=True
+        ).clamp(min=1)
+        emoji_mean = emoji_embeds_masked.sum(dim=2) / emoji_counts
+
+        max_len = int(valid_lengths.max().item())
+        max_len = max(max_len, 1)
+
+        valid_emoji = emoji_mean[non_zero_indices][:, :max_len, :]
+        fused_features = torch.cat(
+            [gru1_output, valid_emoji],
+            dim=-1,
+        )
+
+        valid_post_masks = post_masks[non_zero_indices][:, :max_len]
+
+        # 找到每个用户最后一条有效帖子对应的 BiGRU 表示。
+        last_indices = (
+            valid_post_masks.cumsum(dim=1)
+            == valid_post_masks.sum(dim=1, keepdim=True)
+        ).to(dtype=gru1_output.dtype)
+
+        v_short_valid = (
+            gru1_output * last_indices.unsqueeze(-1)
+        ).sum(dim=1)
+
+        v_common_valid, post_attn_scores_valid = self.global_attention(
+            fused_features,
+            mask=valid_post_masks,
+            return_scores=True,
+        )
+
+        v_short = bert_embeddings.new_zeros(
+            batch_size, 2 * self.gru_size
+        )
+        v_short[non_zero_indices] = v_short_valid
+
+        v_common = bert_embeddings.new_zeros(
+            batch_size, 2 * self.gru_size
+        )
+        v_common[non_zero_indices] = v_common_valid
+
+        post_attn_scores = bert_embeddings.new_zeros(
+            batch_size, total_posts
+        )
+        valid_score_len = post_attn_scores_valid.size(1)
+        post_attn_scores[
+            non_zero_indices, :valid_score_len
+        ] = post_attn_scores_valid
+
+        v_final = self.adaptive_gate_fusion(v_short, v_common)
+        logits = self.class_fc(v_final)
+
         if return_attention:
             return logits, post_attn_scores
         return logits
 
 
 class EmoccInferenceService:
-    """
-    Emocc模型推理服务
-    加载预训练模型，对用户帖子进行自杀风险检测
-    """
-    
-    # 五分类到风险等级映射
+    """Emocc 模型推理服务。"""
+
     CLASS_TO_RISK = {
         0: ("low", 0.1),
         1: ("low", 0.3),
         2: ("medium", 0.5),
         3: ("medium", 0.7),
-        4: ("high", 0.9)
+        4: ("high", 0.9),
     }
-    
+
     def __init__(self):
         self.model = None
         self.emoji_to_id = None
-        self.device = torch.device('cpu')
+        self.device = torch.device("cpu")
         self.is_loaded = False
         self.model_config = None
-        
+        self.dataset_key = None
+        self.model_module = None
+        self.emoji_utils_module = None
+
     def _get_paths(self, dataset_key: str = "reddit"):
-        """按数据集获取模型与资源路径（Emocc/<dataset>/...）。"""
+        """按数据集获取模型与资源路径。"""
         from .emocc_config import get_emocc_dataset_spec
+
         spec = get_emocc_dataset_spec(dataset_key)
-        _ensure_emocc_import_path(dataset_key)
-        model_path = spec.checkpoint_path() if spec.checkpoint_path().exists() else None
+        model_path = (
+            spec.checkpoint_path()
+            if spec.checkpoint_path().exists()
+            else None
+        )
         bert_path = spec.embedding_pickle_path()
         emoji_csv_path = spec.emoji_csv_path()
         emoji2vec_path = spec.emoji2vec_path()
-        return model_path, bert_path, emoji_csv_path, emoji2vec_path, spec
-    
-    def load_model(self, model_path: Optional[str] = None, use_pretrained_emoji: bool = True, dataset_key: str = "reddit") -> bool:
-        """
-        加载Emocc预训练模型
-        
-        Args:
-            model_path: 模型权重路径，默认从Emocc目录查找
-            use_pretrained_emoji: 是否使用预训练的emoji2vec向量（必须与训练时一致）
-        
-        Returns:
-            是否加载成功
-        """
-        if BertEmojiModel is None:
-            print("[EmoccService] Emocc模型未正确导入")
-            return False
-            
-        try:
-            # 确定路径
-            paths = self._get_paths(dataset_key)
-            if model_path:
-                model_file = Path(model_path)
-            else:
-                model_file = paths[0]
-            
-            if model_file is None or not model_file.exists():
-                print(f"[EmoccService] 模型文件未找到: {model_file}")
-                return False
-            
-            # 构建词汇表
-            emoji_csv = paths[2]
-            if not emoji_csv.exists():
-                print(f"[EmoccService] Emoji CSV未找到: {emoji_csv}")
-                return False
 
-            spec = paths[4]
-            class_num = int(getattr(spec, "class_num", 5) or 5)
-            coarse = getattr(spec, "coarse_risk_mapping", {}) or {}
-            scores = getattr(spec, "risk_score_mapping", {}) or {}
-            self.CLASS_TO_RISK = {
-                int(k): (str(coarse.get(int(k), "medium")), float(scores.get(int(k), 0.5)))
-                for k in range(class_num)
+        return (
+            model_path,
+            bert_path,
+            emoji_csv_path,
+            emoji2vec_path,
+            spec,
+        )
+
+    @staticmethod
+    def _extract_state_dict(checkpoint):
+        """兼容常见 checkpoint 包装格式。"""
+        if not isinstance(checkpoint, dict):
+            raise TypeError(
+                f"Checkpoint 应为 dict，实际为 {type(checkpoint).__name__}"
+            )
+
+        if "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        else:
+            state_dict = checkpoint
+
+        if not isinstance(state_dict, dict):
+            raise TypeError("Checkpoint 中未找到有效的 state_dict")
+
+        # 兼容 DataParallel 保存的 module. 前缀。
+        if state_dict and all(
+            isinstance(key, str) and key.startswith("module.")
+            for key in state_dict
+        ):
+            state_dict = {
+                key[len("module."):]: value
+                for key, value in state_dict.items()
             }
-            
-            print(f"[EmoccService] 构建Emoji词汇表...")
-            emoji_vocab, self.emoji_to_id = get_emoji_vocabulary(str(emoji_csv))
-            
-            # 加载预训练的emoji2vec向量（与训练时保持一致）
-            emoji_weights = None
-            emoji2vec_path = paths[3]
-            if use_pretrained_emoji and emoji2vec_path.exists() and load_pretrained_emoji_weights is not None:
-                print(f"[EmoccService] 加载预训练emoji2vec向量: {emoji2vec_path}")
-                emoji_weights_np = load_pretrained_emoji_weights(
-                    emoji_vocab, 
-                    str(emoji2vec_path), 
-                    embedding_dim=300
+
+        return state_dict
+
+    def load_model(
+        self,
+        model_path: Optional[str] = None,
+        use_pretrained_emoji: bool = True,
+        dataset_key: str = "reddit",
+    ) -> bool:
+        """
+        加载指定数据集的 EmoCC 模型。
+
+        dataset_key 例如：weibo / reddit。
+        """
+        self.is_loaded = False
+        self.model = None
+        self.emoji_to_id = None
+        self.model_config = None
+
+        try:
+            paths = self._get_paths(dataset_key)
+            default_model_path, bert_path, emoji_csv, emoji2vec_path, spec = paths
+
+            dataset_key = str(
+                getattr(spec, "dataset_key", dataset_key)
+            ).lower()
+
+            if dataset_key not in {"weibo", "reddit"}:
+                raise ValueError(
+                    f"暂不支持的数据集: {dataset_key}"
                 )
-                emoji_weights = torch.FloatTensor(emoji_weights_np)
-            
-            # 创建模型
+
+            # 通过配置对象取得该数据集的 Emocc 根目录。
+            dataset_root = Path(spec.emocc_root()).resolve()
+            model_file = (
+                Path(model_path).resolve()
+                if model_path
+                else (
+                    Path(default_model_path).resolve()
+                    if default_model_path is not None
+                    else None
+                )
+            )
+
+            if model_file is None or not model_file.is_file():
+                raise FileNotFoundError(
+                    f"模型权重文件不存在: {model_file}"
+                )
+
+            if not Path(emoji_csv).is_file():
+                raise FileNotFoundError(
+                    f"Emoji CSV 不存在: {emoji_csv}"
+                )
+
+            model_py = dataset_root / "Emocc_model" / "model.py"
+            emoji_utils_py = (
+                dataset_root
+                / "Emocc_model"
+                / "utils"
+                / "emoji_utils.py"
+            )
+
+            # 每个数据集使用独立模块名，避免 Emocc_model 同名缓存冲突。
+            model_module = _load_module_from_file(
+                f"_srd_emocc_{dataset_key}_model",
+                model_py,
+            )
+            emoji_utils_module = _load_module_from_file(
+                f"_srd_emocc_{dataset_key}_emoji_utils",
+                emoji_utils_py,
+            )
+
+            required_model_components = (
+                "BertEmojiModel",
+                "AdaptiveGateFusion",
+                "MultiLayerPerceptron",
+            )
+            for component_name in required_model_components:
+                if not hasattr(model_module, component_name):
+                    raise ImportError(
+                        f"{dataset_key} model.py 缺少组件: "
+                        f"{component_name}"
+                    )
+
+            for function_name in (
+                "get_emoji_vocabulary",
+                "load_pretrained_emoji_weights",
+            ):
+                if not hasattr(emoji_utils_module, function_name):
+                    raise ImportError(
+                        f"{dataset_key} emoji_utils.py 缺少函数: "
+                        f"{function_name}"
+                    )
+
+            print(
+                f"[EmoccService] 数据集: {dataset_key}"
+            )
+            print(
+                f"[EmoccService] 模型模块: {model_module.__file__}"
+            )
+            print(
+                f"[EmoccService] Emoji 工具: "
+                f"{emoji_utils_module.__file__}"
+            )
+
+            # 从当前数据集配置读取类别数和风险映射。
+            class_num = int(
+                getattr(spec, "class_num", 5) or 5
+            )
+            if class_num <= 0:
+                raise ValueError(
+                    f"非法 class_num: {class_num}"
+                )
+
+            coarse_mapping = (
+                getattr(spec, "coarse_risk_mapping", {}) or {}
+            )
+            score_mapping = (
+                getattr(spec, "risk_score_mapping", {}) or {}
+            )
+
+            self.CLASS_TO_RISK = {}
+            for class_index in range(class_num):
+                risk_level = coarse_mapping.get(
+                    class_index,
+                    coarse_mapping.get(str(class_index), "medium"),
+                )
+                risk_score = score_mapping.get(
+                    class_index,
+                    score_mapping.get(str(class_index), 0.5),
+                )
+                self.CLASS_TO_RISK[class_index] = (
+                    str(risk_level),
+                    float(risk_score),
+                )
+
+            # 使用当前数据集自己的 emoji_utils 构建词汇表。
+            print("[EmoccService] 构建 Emoji 词汇表...")
+            emoji_vocab, emoji_to_id = (
+                emoji_utils_module.get_emoji_vocabulary(
+                    str(emoji_csv)
+                )
+            )
+
+            if not emoji_vocab or not isinstance(emoji_to_id, dict):
+                raise RuntimeError(
+                    "Emoji 词汇表构建结果无效"
+                )
+            if len(emoji_vocab) != len(emoji_to_id):
+                raise RuntimeError(
+                    "Emoji 词汇表与 emoji_to_id 长度不一致"
+                )
+
+            self.emoji_to_id = emoji_to_id
+
+            # 按需加载 Emoji2Vec 初始化矩阵。
+            emoji_weights = None
+            if use_pretrained_emoji:
+                if not Path(emoji2vec_path).is_file():
+                    raise FileNotFoundError(
+                        f"已要求使用预训练 Emoji，但文件不存在: "
+                        f"{emoji2vec_path}"
+                    )
+
+                print(
+                    f"[EmoccService] 加载 Emoji2Vec: {emoji2vec_path}"
+                )
+                emoji_weights_np = (
+                    emoji_utils_module.load_pretrained_emoji_weights(
+                        emoji_vocab,
+                        str(emoji2vec_path),
+                        embedding_dim=300,
+                    )
+                )
+                emoji_weights_np = np.asarray(
+                    emoji_weights_np,
+                    dtype=np.float32,
+                )
+
+                expected_shape = (len(emoji_vocab), 300)
+                if emoji_weights_np.shape != expected_shape:
+                    raise ValueError(
+                        "Emoji2Vec 矩阵形状不匹配："
+                        f"期望 {expected_shape}，"
+                        f"实际 {emoji_weights_np.shape}"
+                    )
+                if not np.isfinite(emoji_weights_np).all():
+                    raise ValueError(
+                        "Emoji2Vec 矩阵包含 NaN 或 Inf"
+                    )
+
+                emoji_weights = torch.from_numpy(
+                    emoji_weights_np
+                )
+
             args = ModelArgs(
                 dropout=0.5,
                 gru_size=128,
-                class_num=class_num
+                class_num=class_num,
             )
-            
-            print(f"[EmoccService] 创建模型...")
-            self.model = BertEmojiModelWithAttention(
+
+            print("[EmoccService] 创建双模态推理模型...")
+            model = BertEmojiModelWithAttention(
                 args=args,
                 emoji_vocab_size=len(emoji_vocab),
                 device=self.device,
                 emoji_weights=emoji_weights,
-                is_pretrain_emoji=use_pretrained_emoji and emoji_weights is not None
+                is_pretrain_emoji=(
+                    use_pretrained_emoji
+                    and emoji_weights is not None
+                ),
+                adaptive_gate_fusion_cls=(
+                    model_module.AdaptiveGateFusion
+                ),
+                mlp_cls=model_module.MultiLayerPerceptron,
             )
-            
-            # 加载预训练权重
-            print(f"[EmoccService] 加载权重: {model_file}")
-            checkpoint = torch.load(model_file, map_location=self.device)
-            
-            # 处理不同的checkpoint格式
-            if 'model_state_dict' in checkpoint:
-                state_dict = checkpoint['model_state_dict']
-            else:
-                state_dict = checkpoint
-            
-            self.model.load_state_dict(state_dict, strict=False)
-            self.model.to(self.device)
-            self.model.eval()
-            
+
+            print(
+                f"[EmoccService] 加载权重: {model_file}"
+            )
+            checkpoint = torch.load(
+                model_file,
+                map_location=self.device,
+            )
+            state_dict = self._extract_state_dict(checkpoint)
+
+            # 严格加载：不允许遗漏或多余参数静默通过。
+            incompatible = model.load_state_dict(
+                state_dict,
+                strict=True,
+            )
+
+            model.to(self.device)
+            model.eval()
+
+            self.model = model
+            self.model_module = model_module
+            self.emoji_utils_module = emoji_utils_module
+            self.dataset_key = dataset_key
+
             self.model_config = {
-                'model_path': str(model_file),
-                'vocab_size': len(emoji_vocab),
-                'emoji_csv': str(emoji_csv),
-                'emoji2vec_path': str(emoji2vec_path) if use_pretrained_emoji else None,
-                'use_pretrained_emoji': use_pretrained_emoji and emoji_weights is not None
+                "dataset_key": dataset_key,
+                "model_path": str(model_file),
+                "model_module": str(model_py),
+                "emoji_utils_module": str(emoji_utils_py),
+                "bert_embedding_path": str(bert_path),
+                "vocab_size": len(emoji_vocab),
+                "emoji_csv": str(emoji_csv),
+                "emoji2vec_path": (
+                    str(emoji2vec_path)
+                    if use_pretrained_emoji
+                    else None
+                ),
+                "use_pretrained_emoji": (
+                    use_pretrained_emoji
+                    and emoji_weights is not None
+                ),
+                "class_num": class_num,
+                "gru_size": args.gru_size,
+                "bert_dim": 768,
+                "emoji_dim": 300,
+                "strict_checkpoint_loading": True,
+                "missing_keys": list(incompatible.missing_keys),
+                "unexpected_keys": list(incompatible.unexpected_keys),
             }
-            
+
             self.is_loaded = True
-            print(f"[EmoccService] 模型加载成功!")
+            print(
+                f"[EmoccService] {dataset_key} 模型加载成功！"
+            )
+            print(
+                f"[EmoccService] Emoji 词汇表大小: "
+                f"{len(emoji_vocab)}"
+            )
+            print(
+                f"[EmoccService] Checkpoint 严格加载: 成功"
+            )
             return True
-            
-        except Exception as e:
-            print(f"[EmoccService] 模型加载失败: {e}")
+
+        except Exception as exc:
+            self.is_loaded = False
+            self.model = None
+            print(f"[EmoccService] 模型加载失败: {exc}")
             import traceback
             traceback.print_exc()
             return False
-    
+
     def predict_single_user(
         self,
         user_hash: str,
         bert_embeddings: np.ndarray,
         emoji_sequences: List[List[str]],
-        post_texts: Optional[List[str]] = None
+        post_texts: Optional[List[str]] = None,
     ) -> EmoccInferenceResult:
-        """
-        对单个用户进行风险预测
-        
-        Args:
-            user_hash: 用户哈希
-            bert_embeddings: (T, 768) BERT嵌入数组
-            emoji_sequences: 每个帖子的emoji列表
-            post_texts: 每个帖子的文本（用于返回注意力分数对应的帖子）
-        
-        Returns:
-            EmoccInferenceResult
-        """
+        """对单个用户的帖子序列进行双模态风险预测。"""
+
         if not self.is_loaded or self.model is None:
             return EmoccInferenceResult(
                 user_hash=user_hash,
@@ -423,95 +733,185 @@ class EmoccInferenceService:
                 risk_class=-1,
                 confidence=0.0,
                 post_attention_scores=[],
-                model_info={"error": "模型未加载"}
+                model_info={"error": "模型未加载"},
             )
-        
+
         try:
-            import torch.nn.functional as F
-            
-            B, T, bert_dim = 1, bert_embeddings.shape[0], bert_embeddings.shape[1]
-            
-            # 准备数据
+            if bert_embeddings is None:
+                raise ValueError("bert_embeddings 不能为 None")
+
+            bert_embeddings = np.asarray(
+                bert_embeddings,
+                dtype=np.float32,
+            )
+
+            if bert_embeddings.ndim != 2:
+                raise ValueError(
+                    "bert_embeddings 必须是二维数组 (T, 768)，"
+                    f"实际形状: {bert_embeddings.shape}"
+                )
+
+            if bert_embeddings.shape[1] != 768:
+                raise ValueError(
+                    "BERT 特征维度必须为 768，"
+                    f"实际为 {bert_embeddings.shape[1]}"
+                )
+
+            if not np.isfinite(bert_embeddings).all():
+                raise ValueError(
+                    "BERT embeddings 包含 NaN 或 Inf"
+                )
+
+            total_posts = int(bert_embeddings.shape[0])
+            if total_posts == 0:
+                raise ValueError(
+                    "用户没有可供推理的帖子"
+                )
+
+            if emoji_sequences is None:
+                emoji_sequences = []
+
+            batch_size = 1
             max_emojis = 10
-            max_posts = min(50, T)
-            
-            # BERT embeddings
-            bert_embeds = torch.zeros((B, max_posts, bert_dim), dtype=torch.float32)
-            post_mask = torch.zeros((B, max_posts), dtype=torch.float32)
-            
-            for i in range(min(T, max_posts)):
-                bert_embeds[0, i] = torch.tensor(bert_embeddings[i], dtype=torch.float32)
-                post_mask[0, i] = 1.0
-            
-            # Emoji处理
-            emoji_ids = torch.zeros((B, max_posts, max_emojis), dtype=torch.int64)
-            emoji_mask = torch.zeros((B, max_posts, max_emojis), dtype=torch.float32)
-            
-            for i in range(min(T, max_posts)):
-                emojis = emoji_sequences[i] if i < len(emoji_sequences) else []
-                for j, emoji in enumerate(emojis[:max_emojis]):
-                    emoji_id = self.emoji_to_id.get(emoji, self.emoji_to_id.get("<UNK>", 1))
-                    emoji_ids[0, i, j] = emoji_id
-                    emoji_mask[0, i, j] = 1.0
-            
-            # 移动到设备
-            bert_embeds = bert_embeds.to(self.device)
-            emoji_ids = emoji_ids.to(self.device)
-            post_mask = post_mask.to(self.device)
-            emoji_mask = emoji_mask.to(self.device)
-            
-            # 推理
+            max_posts = min(50, total_posts)
+
+            bert_embeds = torch.zeros(
+                (batch_size, max_posts, 768),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            post_mask = torch.zeros(
+                (batch_size, max_posts),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            bert_embeds[0] = torch.from_numpy(
+                bert_embeddings[:max_posts]
+            ).to(self.device)
+            post_mask[0] = 1.0
+
+            emoji_ids = torch.zeros(
+                (batch_size, max_posts, max_emojis),
+                dtype=torch.long,
+                device=self.device,
+            )
+            emoji_mask = torch.zeros(
+                (batch_size, max_posts, max_emojis),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            unknown_id = self.emoji_to_id.get("<UNK>", 1)
+
+            for post_index in range(max_posts):
+                emojis = (
+                    emoji_sequences[post_index]
+                    if post_index < len(emoji_sequences)
+                    else []
+                )
+                if emojis is None:
+                    emojis = []
+
+                for emoji_index, emoji in enumerate(
+                    emojis[:max_emojis]
+                ):
+                    emoji_id = self.emoji_to_id.get(
+                        emoji,
+                        unknown_id,
+                    )
+                    emoji_ids[0, post_index, emoji_index] = int(
+                        emoji_id
+                    )
+                    emoji_mask[0, post_index, emoji_index] = 1.0
+
             with torch.no_grad():
                 logits, attention_scores = self.model(
-                    bert_embeds, emoji_ids, post_mask, emoji_mask, return_attention=True
+                    bert_embeds,
+                    emoji_ids,
+                    post_mask,
+                    emoji_mask,
+                    return_attention=True,
                 )
-            
-            # 处理结果
-            probs = F.softmax(logits, dim=-1)
-            pred_class = torch.argmax(probs, dim=-1).item()
-            confidence = probs[0, pred_class].item()
-            
-            risk_level, risk_score = self.CLASS_TO_RISK.get(pred_class, ("medium", 0.5))
-            
-            # 处理注意力分数
-            attn_np = attention_scores[0].cpu().numpy()
+
+            probabilities = F.softmax(logits, dim=-1)
+            predicted_class = int(
+                torch.argmax(probabilities, dim=-1).item()
+            )
+            confidence = float(
+                probabilities[0, predicted_class].item()
+            )
+
+            risk_level, risk_score = self.CLASS_TO_RISK.get(
+                predicted_class,
+                ("medium", 0.5),
+            )
+
+            attention_np = (
+                attention_scores[0]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+
             post_attention_scores = []
-            
-            for i in range(min(T, max_posts)):
-                if post_texts and i < len(post_texts):
-                    text_preview = post_texts[i][:100] + "..." if len(post_texts[i]) > 100 else post_texts[i]
+            for index in range(max_posts):
+                if post_texts and index < len(post_texts):
+                    text = str(post_texts[index])
+                    text_preview = (
+                        text[:100] + "..."
+                        if len(text) > 100
+                        else text
+                    )
                 else:
-                    text_preview = f"Post {i+1}"
-                
-                post_attention_scores.append({
-                    "post_index": i,
-                    "attention_score": float(attn_np[i]),
-                    "text_preview": text_preview,
-                    "emoji_count": len(emoji_sequences[i]) if i < len(emoji_sequences) else 0
-                })
-            
-            # 按注意力分数排序
-            post_attention_scores.sort(key=lambda x: x["attention_score"], reverse=True)
-            
+                    text_preview = f"Post {index + 1}"
+
+                post_emojis = (
+                    emoji_sequences[index]
+                    if index < len(emoji_sequences)
+                    and emoji_sequences[index] is not None
+                    else []
+                )
+
+                post_attention_scores.append(
+                    {
+                        "post_index": index,
+                        "attention_score": float(
+                            attention_np[index]
+                        ),
+                        "text_preview": text_preview,
+                        "emoji_count": len(post_emojis),
+                    }
+                )
+
+            post_attention_scores.sort(
+                key=lambda item: item["attention_score"],
+                reverse=True,
+            )
+
             return EmoccInferenceResult(
                 user_hash=user_hash,
                 risk_level=risk_level,
-                risk_score=risk_score,
-                risk_class=pred_class,
+                risk_score=float(risk_score),
+                risk_class=predicted_class,
                 confidence=confidence,
                 post_attention_scores=post_attention_scores,
                 model_info={
                     "model_type": "emocc",
-                    "total_posts": T,
-                    "analyzed_posts": min(T, max_posts),
-                    "class_probs": probs[0].cpu().tolist()
-                }
+                    "dataset_key": self.dataset_key,
+                    "total_posts": total_posts,
+                    "analyzed_posts": max_posts,
+                    "class_probs": (
+                        probabilities[0].detach().cpu().tolist()
+                    ),
+                },
             )
-            
-        except Exception as e:
-            print(f"[EmoccService] 推理失败: {e}")
+
+        except Exception as exc:
+            print(f"[EmoccService] 推理失败: {exc}")
             import traceback
             traceback.print_exc()
+
             return EmoccInferenceResult(
                 user_hash=user_hash,
                 risk_level="unknown",
@@ -519,31 +919,25 @@ class EmoccInferenceService:
                 risk_class=-1,
                 confidence=0.0,
                 post_attention_scores=[],
-                model_info={"error": str(e)}
+                model_info={"error": str(exc)},
             )
-    
+
     def predict_batch(
         self,
-        user_data_list: List[Dict]
+        user_data_list: List[Dict[str, Any]],
     ) -> List[EmoccInferenceResult]:
-        """
-        批量预测
-        
-        Args:
-            user_data_list: [{user_hash, bert_embeddings, emoji_sequences, post_texts}, ...]
-        
-        Returns:
-            结果列表
-        """
+        """批量预测多个用户。"""
         results = []
+
         for user_data in user_data_list:
             result = self.predict_single_user(
                 user_hash=user_data.get("user_hash", ""),
                 bert_embeddings=user_data.get("bert_embeddings"),
                 emoji_sequences=user_data.get("emoji_sequences", []),
-                post_texts=user_data.get("post_texts")
+                post_texts=user_data.get("post_texts"),
             )
             results.append(result)
+
         return results
 
 
@@ -552,19 +946,24 @@ _emocc_service: Optional[EmoccInferenceService] = None
 
 
 def get_emocc_service() -> EmoccInferenceService:
-    """获取全局Emocc推理服务单例"""
+    """获取全局 Emocc 推理服务单例。"""
     global _emocc_service
+
     if _emocc_service is None:
         _emocc_service = EmoccInferenceService()
+
     return _emocc_service
 
 
-def load_emocc_model(model_path: Optional[str] = None, use_pretrained_emoji: bool = True, dataset_key: str = "reddit") -> bool:
-    """加载Emocc模型
-    
-    Args:
-        model_path: 模型权重路径，默认从Emocc目录查找
-        use_pretrained_emoji: 是否使用预训练的emoji2vec向量（必须与训练时一致）
-    """
+def load_emocc_model(
+    model_path: Optional[str] = None,
+    use_pretrained_emoji: bool = True,
+    dataset_key: str = "reddit",
+) -> bool:
+    """加载指定数据集的 Emocc 模型。"""
     service = get_emocc_service()
-    return service.load_model(model_path, use_pretrained_emoji, dataset_key=dataset_key)
+    return service.load_model(
+        model_path=model_path,
+        use_pretrained_emoji=use_pretrained_emoji,
+        dataset_key=dataset_key,
+    )

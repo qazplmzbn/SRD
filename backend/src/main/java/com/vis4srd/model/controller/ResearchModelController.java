@@ -24,7 +24,7 @@ public class ResearchModelController {
         return ApiResponse.ok(models.getModels(null,null,null).stream().map(row -> {
             Map<String,Object> safe = new LinkedHashMap<>();
             for (String key : List.of("id","modelName","modelType","status","description")) safe.put(key,row.get(key));
-            safe.put("supportsTrial", List.of("api","ollama").contains(String.valueOf(row.get("modelType"))) && "active".equals(row.get("status")));
+            safe.put("supportsTrial", "api".equals(row.get("modelType")) && "active".equals(row.get("status")));
             return safe;
         }).toList());
     }
@@ -34,10 +34,9 @@ public class ResearchModelController {
         var config=models.getModelForInference(id);
         if(config==null) throw new BusinessException(HttpStatus.NOT_FOUND,"模型不存在或未启用");
         String type=String.valueOf(config.get("model_type"));
-        if(!List.of("api","ollama").contains(type)) throw new BusinessException(HttpStatus.BAD_REQUEST,"此模型需要专用输入，请使用检测任务入口");
+        if(!"api".equals(type)) throw new BusinessException(HttpStatus.BAD_REQUEST,"请选择已启用的大模型");
         long start=System.nanoTime();
-        var result=type.equals("api") ? models.callApiModel(config,input.text(),"请根据输入提供分析，说明依据与不确定性，不将输出作为临床诊断。")
-                : models.callOllamaModel(config,input.text(),"请根据输入提供分析，说明依据与不确定性，不将输出作为临床诊断。");
+        var result=models.callApiModel(config,input.text(),"请根据输入提供分析，说明依据与不确定性，不将输出作为临床诊断。");
         if(!Boolean.TRUE.equals(result.get("success"))) throw new BusinessException(HttpStatus.BAD_GATEWAY,"模型调用失败，请联系管理员检查服务配置或稍后重试");
         long elapsed=(System.nanoTime()-start)/1_000_000;
         models.updateModelUsage(id,(int)Math.min(elapsed,Integer.MAX_VALUE));

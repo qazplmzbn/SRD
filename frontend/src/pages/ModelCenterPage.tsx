@@ -20,21 +20,6 @@ type PresetOption = {
   hint?: string;
 };
 
-const COMMON_OLLAMA_VARIANTS = ['0.5b', '1.5b', '3b', '7b', '8b', '14b', '27b', '30b', '32b', '70b', 'latest'];
-
-const OLLAMA_BASE_MODEL_PRESETS: Array<{
-  value: string;
-  label: string;
-  variants: string[];
-  note?: string;
-}> = [
-  { value: 'granite4.1', label: 'granite4.1', variants: ['3b', '8b', '30b'], note: '官方页面提供 3b / 8b / 30b 三种规格。' },
-  { value: 'qwen2', label: 'qwen2', variants: ['1.5b', '7b', '72b'] },
-  { value: 'qwen2.5', label: 'qwen2.5', variants: ['0.5b', '1.5b', '3b', '7b', '14b', '32b', '72b'] },
-  { value: 'deepseek-r1', label: 'deepseek-r1', variants: ['1.5b', '7b', '8b', '14b', '32b', '70b'] },
-  { value: 'deepseek-coder', label: 'deepseek-coder', variants: ['1.3b', '6.7b', '33b', 'latest'] },
-  { value: 'llama3', label: 'llama3', variants: ['8b', '70b'] },
-];
 
 const API_MODEL_ID_PRESETS: Record<string, PresetOption[]> = {
   openai: [
@@ -80,30 +65,7 @@ const API_MODEL_ID_PRESETS: Record<string, PresetOption[]> = {
   ],
 };
 
-function parseOllamaModelIdentifier(value?: string): { base: string; variant: string } {
-  const raw = String(value || '').trim();
-  const lastColonIndex = raw.lastIndexOf(':');
-  if (lastColonIndex <= 0 || lastColonIndex === raw.length - 1) {
-    return { base: raw, variant: '' };
-  }
-  return {
-    base: raw.slice(0, lastColonIndex),
-    variant: raw.slice(lastColonIndex + 1),
-  };
-}
-
-function buildOllamaModelIdentifier(base: string, variant: string): string {
-  const normalizedBase = base.trim();
-  const normalizedVariant = variant.trim();
-  if (!normalizedBase) return '';
-  return normalizedVariant ? `${normalizedBase}:${normalizedVariant}` : normalizedBase;
-}
-
 function getVariantBadge(model: UnifiedModel): string {
-  if (model.modelCategory === 'local_llm') {
-    const parsed = parseOllamaModelIdentifier(model.ollamaModelName || '');
-    return parsed.variant;
-  }
   if (model.modelCategory === 'api') {
     return model.modelCode || '';
   }
@@ -331,13 +293,10 @@ function AddModelModal({
   };
 
   const [modelType, setModelType] = useState<'api' | 'local'>('api');
-  const [localModelSubType, setLocalModelSubType] = useState<'llm' | 'detection'>('llm');
-  const [detectionModelType, setDetectionModelType] = useState<'emoji'>('emoji');
-  const [llmDeployType] = useState<'ollama' | 'transformers'>('ollama');
+  const [detectionModelType, setDetectionModelType] = useState<'emoji'|'fealearner'>('emoji');
   const [formData, setFormData] = useState({
     modelName: '', description: '', apiKey: '', baseUrl: '',
     provider: '', configTemplate: '', apiModelId: '',
-    ollamaModelName: '', ollamaBaseModel: '', ollamaVariant: '',
     modelPath: '', enabled: true,
   });
   const [saving, setSaving] = useState(false);
@@ -365,8 +324,6 @@ function AddModelModal({
       const inferredTemplate = m.configTemplate || inferApiTemplateKey(m.provider, m.apiBaseUrl || m.api_base_url);
       const modelCategory = m.modelCategory || m.model_category || '';
       const modelTypeValue = m.modelType || m.model_type || '';
-      const ollamaIdentifier = m.ollamaModelName || m.ollama_model_name || '';
-      const parsedOllama = parseOllamaModelIdentifier(ollamaIdentifier);
       const apiModelId = m.modelCode || m.model_code || m.modelName || m.name || '';
       setFormData({
         modelName: m.modelName || m.name || '',
@@ -376,39 +333,23 @@ function AddModelModal({
         provider: m.provider || '',
         configTemplate: inferredTemplate,
         apiModelId,
-        ollamaModelName: ollamaIdentifier,
-        ollamaBaseModel: parsedOllama.base,
-        ollamaVariant: parsedOllama.variant,
         modelPath: m.modelPath || m.model_path || m.modelFilePath || '',
         enabled: m.status === 'active',
       });
 
       if (modelCategory === 'api' || modelTypeValue === 'api') {
         setModelType('api');
-      } else if (modelCategory === 'local_llm' || m.provider === 'ollama' || m.ollamaModelName || m.ollama_model_name) {
-        setModelType('local');
-        setLocalModelSubType('llm');
-      } else if (modelCategory === 'detection' || modelTypeValue === 'emoji') {
-        setModelType('local');
-        setLocalModelSubType('detection');
-        setDetectionModelType('emoji');
       } else {
         setModelType('local');
-        const path = m.modelPath || m.model_path || '';
-        if (path.includes('emoji') || (m.modelType && m.modelType === 'emoji')) {
-          setLocalModelSubType('detection'); setDetectionModelType('emoji');
-        } else {
-          setLocalModelSubType('llm');
-        }
+        setDetectionModelType(modelTypeValue === 'fealearner' ? 'fealearner' : 'emoji');
       }
     } else {
       setFormData({
         modelName: '', description: '', apiKey: '', baseUrl: '',
         provider: '', configTemplate: '', apiModelId: '',
-        ollamaModelName: '', ollamaBaseModel: '', ollamaVariant: '',
         modelPath: '', enabled: true,
       });
-      setModelType('api'); setLocalModelSubType('llm'); setDetectionModelType('emoji');
+      setModelType('api'); setDetectionModelType('emoji');
     }
     setSaveError(null);
   }, [editData, isOpen]);
@@ -428,23 +369,6 @@ function AddModelModal({
     }));
   }, [formData.configTemplate, modelType]);
 
-  useEffect(() => {
-    if (modelType !== 'local' || localModelSubType !== 'llm') return;
-    setFormData((prev) => ({
-      ...prev,
-      ollamaModelName: buildOllamaModelIdentifier(prev.ollamaBaseModel, prev.ollamaVariant),
-    }));
-  }, [modelType, localModelSubType, formData.ollamaBaseModel, formData.ollamaVariant]);
-
-  useEffect(() => {
-    if (modelType !== 'local' || localModelSubType !== 'llm') return;
-    const matchedPreset = OLLAMA_BASE_MODEL_PRESETS.find((item) => item.value === formData.ollamaBaseModel);
-    if (!matchedPreset || formData.ollamaVariant) return;
-    setFormData((prev) => ({
-      ...prev,
-      ollamaVariant: matchedPreset.variants[0] || '',
-    }));
-  }, [modelType, localModelSubType, formData.ollamaBaseModel, formData.ollamaVariant]);
 
   if (!isOpen) return null;
 
@@ -471,26 +395,11 @@ function AddModelModal({
           configTemplate: formData.configTemplate || undefined,
         });
       } else {
-        if (localModelSubType === 'llm') {
-          const finalOllamaModelName = buildOllamaModelIdentifier(formData.ollamaBaseModel, formData.ollamaVariant);
-          if (!finalOllamaModelName) {
-            setSaveError('请选择或输入 Ollama 基座模型与规格');
-            setSaving(false);
-            return;
-          }
-          Object.assign(payload, {
-            modelType: llmDeployType, modelCategory: 'local_llm',
-            ollamaBaseUrl: 'http://localhost:11434',
-            ollamaModelName: finalOllamaModelName,
-            description: formData.description,
-          });
-        } else {
           Object.assign(payload, {
             modelType: detectionModelType, modelCategory: 'detection',
             detectionType: detectionModelType,
             modelPath: formData.modelPath, description: formData.description,
           });
-        }
       }
       if (editData?.id) { await updateModel(editData.id, payload); }
       else { await createModel(payload); }
@@ -527,23 +436,16 @@ function AddModelModal({
   const isEditing = !!editData?.id;
   const selectedTemplate = formData.configTemplate ? apiTemplateConfigs[formData.configTemplate] : null;
   const currentApiModelPresets = API_MODEL_ID_PRESETS[formData.configTemplate || formData.provider || ''] || [];
-  const selectedOllamaBasePreset = OLLAMA_BASE_MODEL_PRESETS.find((item) => item.value === formData.ollamaBaseModel);
-  const currentOllamaVariants = selectedOllamaBasePreset?.variants?.length ? selectedOllamaBasePreset.variants : COMMON_OLLAMA_VARIANTS;
   const lockApiStructure = isEditing && modelType === 'api';
   const lockModelType = isEditing;
   const lockLocalSubType = isEditing && modelType === 'local';
   const modelNamePlaceholder = modelType === 'api'
     ? `例如：${selectedTemplate?.label || '通义千问'}-${selectedTemplate?.modelNameExample || 'qwen-flash'}`
-    : localModelSubType === 'llm'
-    ? '例如：DeepSeek-R1-7B（本地）'
     : '例如：Emocc-Reddit';
   const descriptionPlaceholder = modelType === 'api'
     ? '例如：用于在线问答 / 风险复核 / 轻量推理'
-    : localModelSubType === 'llm'
-    ? '例如：本地 Ollama 模型，用于离线推理'
     : '例如：Emocc-Reddit 五分类或 FeaLearner-Reddit 五分类，说明适用数据集、分类任务和依赖文件';
   const apiModelIdPlaceholder = selectedTemplate?.modelNameExample || '例如：qwen3.6-plus / gpt-4.1-mini';
-  const ollamaIdentifierPreview = buildOllamaModelIdentifier(formData.ollamaBaseModel, formData.ollamaVariant);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -579,11 +481,11 @@ function AddModelModal({
               <div className="flex gap-3">
                 {modelType === 'api' ? (
                   <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-[#2F6BFF] bg-[#F3F8FF]">
-                    <Cloud className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">API 模型</span>
+                    <Cloud className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">大模型</span>
                   </div>
                 ) : (
                   <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-[#2F6BFF] bg-[#F3F8FF]">
-                    <Server className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">本地模型</span>
+                    <Server className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">检测模型</span>
                   </div>
                 )}
               </div>
@@ -591,11 +493,11 @@ function AddModelModal({
               <div className="flex gap-3">
                 <label className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all ${modelType === 'api' ? 'border-[#2F6BFF] bg-[#F3F8FF]' : 'border-gray-200 hover:border-gray-300'}`}>
                   <input type="radio" name="mt" checked={modelType === 'api'} onChange={() => setModelType('api')} className="w-4 h-4 text-[#2F6BFF]" />
-                  <Cloud className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">API 模型</span>
+                  <Cloud className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">大模型</span>
                 </label>
                 <label className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all ${modelType === 'local' ? 'border-[#2F6BFF] bg-[#F3F8FF]' : 'border-gray-200 hover:border-gray-300'}`}>
                   <input type="radio" name="mt" checked={modelType === 'local'} onChange={() => setModelType('local')} className="w-4 h-4 text-[#2F6BFF]" />
-                  <Server className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">本地模型</span>
+                  <Server className="w-4 h-4 text-gray-500" /><span className="font-medium text-sm">检测模型</span>
                 </label>
               </div>
             )}
@@ -675,115 +577,14 @@ function AddModelModal({
               </div>
             ) : (
               <div className="space-y-3 pl-3 border-l-2 border-[#DCE7F5]">
-                <div>
-                  <label className="block text-sm font-semibold text-[#162033] mb-2">本地模型类型</label>
-                  {lockLocalSubType ? (
-                    <div className="flex gap-3">
-                      {localModelSubType === 'llm' ? (
-                        <div className="flex-1 flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-[#2F6BFF] bg-[#F3F8FF]">
-                          <Bot className="w-4 h-4 text-gray-500" /><span className="text-sm font-medium">LLM</span>
-                        </div>
-                      ) : (
-                        <div className="flex-1 flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-[#2F6BFF] bg-[#F3F8FF]">
-                          <Brain className="w-4 h-4 text-gray-500" /><span className="text-sm font-medium">检测模型</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex gap-3">
-                      <label className={`flex-1 flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 cursor-pointer transition-all ${localModelSubType === 'llm' ? 'border-[#2F6BFF] bg-[#F3F8FF]' : 'border-gray-200'}`}>
-                        <input type="radio" name="lmt" checked={localModelSubType === 'llm'} onChange={() => setLocalModelSubType('llm')} className="w-4 h-4 text-[#2F6BFF]" />
-                        <Bot className="w-4 h-4 text-gray-500" /><span className="text-sm font-medium">LLM</span>
-                      </label>
-                      <label className={`flex-1 flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 cursor-pointer transition-all ${localModelSubType === 'detection' ? 'border-[#2F6BFF] bg-[#F3F8FF]' : 'border-gray-200'}`}>
-                        <input type="radio" name="lmt" checked={localModelSubType === 'detection'} onChange={() => setLocalModelSubType('detection')} className="w-4 h-4 text-[#2F6BFF]" />
-                        <Brain className="w-4 h-4 text-gray-500" /><span className="text-sm font-medium">检测模型</span>
-                      </label>
-                    </div>
-                  )}
-                </div>
-                {localModelSubType === 'llm' && (
-                  <div className="space-y-3 pl-3 border-l-2 border-[#DCE7F5]">
-                    <div>
-                      <label className="block text-sm font-medium text-[#162033] mb-1.5">基座模型</label>
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {OLLAMA_BASE_MODEL_PRESETS.map((item) => (
-                          <button
-                            key={item.value}
-                            type="button"
-                            onClick={() => setFormData({ ...formData, ollamaBaseModel: item.value })}
-                            className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
-                              formData.ollamaBaseModel === item.value
-                                ? 'border-[#2F6BFF] bg-[#E8F0FF] text-[#2F6BFF]'
-                                : 'border-[#DCE7F5] bg-white text-[#64748B] hover:border-[#93C5FD] hover:text-[#2F6BFF]'
-                            }`}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="text"
-                        value={formData.ollamaBaseModel}
-                        onChange={(e) => setFormData({ ...formData, ollamaBaseModel: e.target.value })}
-                        placeholder="例如：granite4.1 / qwen2.5 / deepseek-r1"
-                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#2F6BFF] outline-none text-sm font-mono"
-                      />
-                      {selectedOllamaBasePreset?.note && (
-                        <p className="mt-1.5 text-xs text-[#64748B]">{selectedOllamaBasePreset.note}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-[#162033] mb-1.5">参数规格 / Tag</label>
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {currentOllamaVariants.map((item) => (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => setFormData({ ...formData, ollamaVariant: item })}
-                            className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
-                              formData.ollamaVariant === item
-                                ? 'border-[#2F6BFF] bg-[#E8F0FF] text-[#2F6BFF]'
-                                : 'border-[#DCE7F5] bg-white text-[#64748B] hover:border-[#93C5FD] hover:text-[#2F6BFF]'
-                            }`}
-                          >
-                            {item}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="text"
-                        value={formData.ollamaVariant}
-                        onChange={(e) => setFormData({ ...formData, ollamaVariant: e.target.value })}
-                        placeholder="例如：3b / 8b / 30b，也可手动输入自定义 tag"
-                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#2F6BFF] outline-none text-sm font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-[#162033] mb-1.5">生成的 Ollama 模型名</label>
-                      <input
-                        type="text"
-                        value={ollamaIdentifierPreview}
-                        readOnly
-                        placeholder="例如：granite4.1:3b"
-                        className="w-full px-4 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm text-gray-500 font-mono"
-                      />
-                      <p className="mt-1.5 text-xs text-[#64748B]">系统会按这个名称去调用 Ollama。你可以点预设规格，也可以手动输入自定义参数 tag。</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-[#162033] mb-1.5">服务地址</label>
-                      <input type="text" value="http://localhost:11434" readOnly
-                        className="w-full px-4 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm text-gray-400" />
-                    </div>
-                  </div>
-                )}
-                {localModelSubType === 'detection' && (
+                {(
                   <div className="space-y-3 pl-3 border-l-2 border-[#DCE7F5]">
                     <div>
                       <label className="block text-sm font-medium text-[#162033] mb-1.5">模型类型</label>
-                      <select value={detectionModelType} onChange={(e) => setDetectionModelType(e.target.value as 'emoji')}
+                      <select value={detectionModelType} onChange={(e) => setDetectionModelType(e.target.value === 'fealearner' ? 'fealearner' : 'emoji')}
                         className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#2F6BFF] focus:outline-none text-sm bg-white">
                         <option value="emoji">Emocc 检测模型</option>
+                        <option value="fealearner">FeaLearner 检测模型</option>
                       </select>
                     </div>
                     <div>
@@ -1005,8 +806,8 @@ function ModelDetailModal({
               : m.modelType === 'fealearner'
               ? <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">FeaLearner 风险检测</span>
               : m.modelCategory === 'api'
-              ? <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">API 模型</span>
-              : <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium">本地 LLM</span>}
+              ? <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">大模型</span>
+              : <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium">检测模型</span>}
           </div>
           {m.isBuiltin && (
             <div className="flex items-center gap-3"><span className="text-[#64748B] font-medium w-20">预置</span>
@@ -1015,9 +816,6 @@ function ModelDetailModal({
           )}
           {m.provider && (
             <div className="flex items-center gap-3"><span className="text-[#64748B] font-medium w-20">提供商</span><span className="text-[#415168]">{m.provider}</span></div>
-          )}
-          {m.ollamaModelName && (
-            <div className="flex items-center gap-3"><span className="text-[#64748B] font-medium w-20">Ollama名称</span><span className="text-[#415168] font-mono text-xs">{m.ollamaModelName}</span></div>
           )}
           {m.modelFilePath && m.modelType !== 'fealearner' && m.modelType !== 'emoji' && (
             <div className="flex items-center gap-3"><span className="text-[#64748B] font-medium w-20">模型路径</span><span className="text-[#415168] font-mono text-xs break-all">{m.modelFilePath}</span></div>
@@ -1093,7 +891,6 @@ export default function ModelCenterPage() {
 
   // 数据状态
   const [apiModels, setApiModels] = useState<UnifiedModel[]>([]);
-  const [localModels, setLocalModels] = useState<UnifiedModel[]>([]);
   const [detectionModels, setDetectionModels] = useState<UnifiedModel[]>([]);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -1104,7 +901,6 @@ export default function ModelCenterPage() {
     fetchModels().then((models) => {
       if (models && models.length > 0) {
         setApiModels((models as UnifiedModel[]).filter((m) => m.modelCategory === 'api'));
-        setLocalModels((models as UnifiedModel[]).filter((m) => m.modelCategory === 'local_llm'));
         const dsOrder = ['reddit', 'weibo', 'bigdata', 'sigir'];
         const det = (models as UnifiedModel[]).filter((m) => m.modelCategory === 'detection');
         det.sort((a, b) => {
@@ -1158,7 +954,7 @@ export default function ModelCenterPage() {
     } finally { setDeleteLoading(false); }
   };
 
-  // 判断 API 模型是否需要配置 API Key
+  // 判断 大模型是否需要配置 API Key
   const needsApiKey = (m: UnifiedModel) =>
     m.modelCategory === 'api' && !m.hasApiKey && m.isBuiltin;
 
@@ -1206,7 +1002,7 @@ export default function ModelCenterPage() {
                   m.supportedDatasets?.length ? `适用：${m.supportedDatasets.join(' / ')}` : null,
                   m.modelCode ? `调用 ID：${m.modelCode}` : null,
                 ].filter(Boolean).join(' · ') || '本地检测模型'
-              : `${m.provider ? `${m.provider} · ` : ''}${m.ollamaModelName ? `Ollama: ${m.ollamaModelName}` : m.modelCode ? `模型ID: ${m.modelCode}` : m.modelType || '—'}`}
+              : `${m.provider ? `${m.provider} · ` : ''}${m.modelCode ? `模型ID: ${m.modelCode}` : m.modelType || '—'}`}
           </p>
         </div>
 
@@ -1293,15 +1089,15 @@ export default function ModelCenterPage() {
                 添加模型
               </ActionCapsuleButton>
               <span className="text-sm text-[#64748B]">
-                {modelsLoading ? '加载中...' : `${apiModels.length + localModels.length + detectionModels.length} 个模型`}
+                {modelsLoading ? '加载中...' : `${apiModels.length + detectionModels.length} 个模型`}
               </span>
             </div>
 
-            {/* API 模型 */}
+            {/* 大模型 */}
             <div className="bg-white rounded-2xl shadow-sm border border-[#E2E8F0] overflow-hidden">
               <div className="flex items-center gap-3 px-5 py-3.5 bg-gradient-to-r from-[#F3F8FF] to-[#EDF4FF] border-b border-[#DCE7F5]">
                 <Cloud className="w-4 h-4 text-[#2F6BFF]" />
-                <span className="font-semibold text-sm text-[#162033]">API 模型</span>
+                <span className="font-semibold text-sm text-[#162033]">大模型</span>
                 <span className="ml-auto px-2 py-0.5 bg-[#E8F0FF] text-[#2F6BFF] text-xs font-medium rounded-full">
                   {modelsLoading ? '...' : apiModels.length}
                 </span>
@@ -1309,29 +1105,12 @@ export default function ModelCenterPage() {
               {modelsLoading ? (
                 <div className="p-8 text-center text-sm text-[#64748B]">加载中...</div>
               ) : apiModels.length === 0 ? (
-                <div className="p-8 text-center text-sm text-[#64748B]">暂无 API 模型，点击上方按钮添加</div>
+                <div className="p-8 text-center text-sm text-[#64748B]">暂无 大模型，点击上方按钮添加</div>
               ) : (
                 apiModels.map((m) => <ModelRow key={m.id} model={m} />)
               )}
             </div>
 
-            {/* 本地 LLM 模型 */}
-            <div className="bg-white rounded-2xl shadow-sm border border-[#E2E8F0] overflow-hidden">
-              <div className="flex items-center gap-3 px-5 py-3.5 bg-gradient-to-r from-teal-50 to-teal-100/50 border-b border-teal-100">
-                <Server className="w-4 h-4 text-teal-600" />
-                <span className="font-semibold text-sm text-[#162033]">本地 LLM 模型</span>
-                <span className="ml-auto px-2 py-0.5 bg-teal-200 text-teal-700 text-xs font-medium rounded-full">
-                  {modelsLoading ? '...' : localModels.length}
-                </span>
-              </div>
-              {modelsLoading ? (
-                <div className="p-8 text-center text-sm text-[#64748B]">加载中...</div>
-              ) : localModels.length === 0 ? (
-                <div className="p-8 text-center text-sm text-[#64748B]">暂无本地模型，点击上方按钮添加</div>
-              ) : (
-                localModels.map((m) => <ModelRow key={m.id} model={m} />)
-              )}
-            </div>
 
             {/* 检测模型 */}
             <div className="bg-white rounded-2xl shadow-sm border border-[#E2E8F0] overflow-hidden">

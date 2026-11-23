@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuthStore } from '../store/authStore';
 import { useLocation } from 'react-router-dom';
 import {
   Plus, RefreshCw, Eye, X, Check, AlertTriangle,
@@ -236,8 +237,7 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }>
 };
 
 const MODEL_CATEGORIES = [
-  { value: 'api',       label: 'API 模型',   icon: Cloud  },
-  { value: 'local_llm', label: '本地 LLM',   icon: Bot    },
+  { value: 'api',       label: '大模型',   icon: Cloud  },
   { value: 'emocc',     label: '检测模型',    icon: Brain  },
 ];
 
@@ -284,7 +284,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
 
     Promise.allSettled([
       fetchApiModelsForRiskPage(),
-      fetchLlmModelsForRiskPage(),
+      Promise.resolve<RiskPageLlmModel[]>([]),
       fetchDetectionModelsForRiskPage(),
       fetchPromptTemplatesForRiskPage(),
     ]).then((results) => {
@@ -534,7 +534,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
           };
         }
       } else {
-        // API 模型或本地 LLM 模型：仅创建（状态为 pending），不立即执行
+        // 大模型：仅创建（状态为 pending），不立即执行
         const modelId = modelCategory === 'api' ? (selectedApiModel ? parseInt(selectedApiModel.id) : undefined) : (selectedLlmModel ? parseInt(selectedLlmModel.id) : undefined);
         const modelName = modelCategory === 'api' ? selectedApiModel?.name : selectedLlmModel?.name;
 
@@ -798,20 +798,20 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
             )}
           </div>
 
-          {/* API 模型选择 */}
+          {/* 大模型选择 */}
           {modelCategory === 'api' && (
             <div>
-              <label className="block text-sm font-medium text-[#64748B] mb-2">API 模型</label>
+              <label className="block text-sm font-medium text-[#64748B] mb-2">大模型</label>
               {loadingModels ? (
                 <div className="flex items-center justify-center p-6 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-sm text-slate-500">
                   <Loader className="mr-2 h-4 w-4 animate-spin" />
-                  正在加载 API 模型...
+                  正在加载 大模型...
                 </div>
               ) : activeApiModels.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50">
                   <Cloud className="w-8 h-8 text-gray-300 mb-2" />
-                  <p className="text-sm text-gray-500">暂无可用的 API 模型</p>
-                  <p className="text-xs text-gray-400 mt-1">请在模型中心配置 MiniMax 或其他 API 模型</p>
+                  <p className="text-sm text-gray-500">暂无可用的 大模型</p>
+                  <p className="text-xs text-gray-400 mt-1">请在模型中心配置 MiniMax 或其他 大模型</p>
                 </div>
               ) : (
                 <div className="grid max-h-72 grid-cols-2 gap-3 overflow-y-auto pr-1">
@@ -837,46 +837,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
             </div>
           )}
 
-          {/* 本地 LLM 选择 */}
-          {modelCategory === 'local_llm' && (
-            <div>
-              <label className="block text-sm font-medium text-[#64748B] mb-2">本地 LLM</label>
-              {loadingModels ? (
-                <div className="flex items-center justify-center p-6 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 text-sm text-slate-500">
-                  <Loader className="mr-2 h-4 w-4 animate-spin" />
-                  正在加载本地 LLM...
-                </div>
-              ) : activeLlmModels.length === 0 ? (
-                <div className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50">
-                  <Server className="w-8 h-8 text-gray-300 mb-2" />
-                  <p className="text-sm text-gray-500">暂无可用的本地 LLM</p>
-                  <p className="text-xs text-gray-400 mt-1">请确保 Ollama 服务已启动并配置模型</p>
-                </div>
-              ) : (
-                <div className="grid max-h-60 grid-cols-2 gap-3 overflow-y-auto pr-1">
-                  {activeLlmModels.map(model => (
-                    <button
-                      key={model.id}
-                      type="button"
-                      aria-pressed={selectedLlmModel?.id === model.id}
-                      onClick={() => setSelectedLlmModel(model)}
-                      className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 text-center transition-all bg-white ${
-                        selectedLlmModel?.id === model.id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-blue-200'
-                      }`}
-                    >
-                      <Bot className={`w-6 h-6 mb-1 ${model.status === 'active' ? 'text-[#2F6BFF]' : 'text-gray-300'}`} />
-                      <span className="font-medium text-sm text-[#162033]">{model.name}</span>
-                      <span className={`mt-1 text-xs px-2 py-0.5 rounded-full ${model.status === 'active' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                        {model.status === 'active' ? '可用' : '不可用'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 指令模板选择 - API 模型和本地 LLM 都可选择 */}
+          {/* 指令模板选择 */}
           {(modelCategory === 'api' || modelCategory === 'local_llm') && (
             <div>
               <label className="block text-sm font-semibold text-[#415168] mb-2">
@@ -1619,6 +1580,7 @@ function DeleteConfirmModal({ isOpen, onClose, onConfirm, taskName }: {
 // ==================== 主页面 ====================
 
 export default function RiskPage() {
+  const platformReadOnly = useAuthStore(s => s.user?.role !== 'admin' && s.user?.role !== 'researcher');
   // 状态
   const [viewMode, setViewMode] = useState<'list' | 'result'>('list');
   const [selectedTask, setSelectedTask] = useState<RiskTask | null>(null);
@@ -1990,7 +1952,7 @@ export default function RiskPage() {
     {
       label: '检测任务',
       value: stats.total,
-      note: '覆盖 API、本地 LLM、Emocc 与 FeaLearner 的检测任务总量',
+      note: '覆盖大模型、Emocc 与 FeaLearner 的检测任务总量',
       icon: Activity,
       tone: 'blue' as const,
     },
@@ -2085,7 +2047,7 @@ export default function RiskPage() {
 
           {/* 新建按钮 */}
           <div className="ml-auto">
-            <ActionCapsuleButton onClick={() => setIsCreateModalOpen(true)} variant="solid" size="lg" icon={<Plus className="w-4 h-4" />}>
+            <ActionCapsuleButton disabled={platformReadOnly} onClick={() => setIsCreateModalOpen(true)} variant="solid" size="lg" icon={<Plus className="w-4 h-4" />}>
               新建任务
             </ActionCapsuleButton>
           </div>
@@ -2181,7 +2143,7 @@ export default function RiskPage() {
                           {/* 开始执行按钮：始终显示，执行后变灰色 */}
                           <ActionCapsuleButton
                             onClick={() => handleExecute(task)}
-                            disabled={executingTaskId === task.id || task.status === 'completed' || task.status === 'running'}
+                            disabled={platformReadOnly || executingTaskId === task.id || task.status === 'completed' || task.status === 'running'}
                             tone="green"
                             tableAction
                             icon={executingTaskId === task.id ? (
@@ -2247,7 +2209,7 @@ export default function RiskPage() {
 
       {/* 创建任务弹窗 */}
       <CreateTaskModal
-        isOpen={isCreateModalOpen}
+        isOpen={!platformReadOnly && isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onCreated={handleTaskCreated}
         dataSources={dataSources}

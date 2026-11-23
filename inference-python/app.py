@@ -42,6 +42,7 @@ class InferRequest(BaseModel):
     posts: Optional[List[str]] = None
 
 class ReviewRequest(BaseModel):
+    emojiSequences: Optional[List[str]] = Field(None,max_length=32)
     model: Literal['emocc', 'fealearner'] = 'emocc'
     posts: List[str] = Field(...,min_length=1,max_length=32)
 
@@ -71,7 +72,9 @@ def appointment_review(body:ReviewRequest):
         if body.model == 'fealearner':
             from services.appointment_fealearner import review as review_features
             return review_features(body.posts)
-        return review(body.posts)
+        if not body.emojiSequences or len(body.emojiSequences)!=len(body.posts):
+            raise HTTPException(422,'Expected one emoji sequence per post')
+        return review(body.posts,body.emojiSequences)
     except (ImportError,RuntimeError,OSError,ValueError,KeyError):raise HTTPException(503,'Local encoder or checkpoint unavailable')
 
 

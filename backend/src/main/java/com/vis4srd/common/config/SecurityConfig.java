@@ -48,6 +48,13 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/upload/archive", "/api/upload/archive/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/datasets/upload", "/api/datasets/builtin/sync").hasRole("ADMIN")
+                        .requestMatchers("/api/models/ollama/**").denyAll()
+                        .requestMatchers(HttpMethod.POST, "/api/risk/tasks", "/api/risk/tasks/*/execute",
+                                "/api/risk/emocc-tasks", "/api/risk/emocc-tasks/*/execute",
+                                "/api/risk/fealearner-tasks", "/api/risk/fealearner-tasks/*/execute").hasAnyRole("ADMIN", "RESEARCHER")
+                        .requestMatchers(HttpMethod.POST,"/api/risk/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE,"/api/risk/**").hasRole("ADMIN")
+                        .requestMatchers("/api/risk/predict/**").hasRole("ADMIN")
                         .requestMatchers("/api/research/**").hasAnyRole("ADMIN", "RESEARCHER", "DOCTOR")
                         .requestMatchers("/api/me/doctor-applications").hasAnyRole("RESEARCHER", "DOCTOR", "ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/models/api/configured").hasAnyRole("DOCTOR", "RESEARCHER", "ADMIN")

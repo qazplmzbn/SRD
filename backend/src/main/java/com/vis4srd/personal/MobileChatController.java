@@ -21,6 +21,6 @@ public class MobileChatController {
     public ApiResponse<String> answer(@Valid @RequestBody Question question) {
         SecurityUtils.requireCurrentUser();
         return ApiResponse.ok(model.sceneChat("你是手机端通用问答助手。根据本次对话简短回答，一次最多问一个问题。不诊断。明确有即时危险时建议联系当地紧急服务或身边可信任的人。",
-                question.conversation(), scenes.getMobileModel(), null, scenes.getMobileTemperature(), scenes.getMobileMaxTokens()));
+                question.conversation(), scenes.getMobileModel(), scenes.getMobileTemperature(), scenes.getMobileMaxTokens()));
     }
 }

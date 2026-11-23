@@ -31,7 +31,7 @@ public class CompanionLineController {
     @PostMapping("/line")
     public ApiResponse<String> line(@Valid @RequestBody Request request) {
         SecurityUtils.requireCurrentUser();
-        String text = model.sceneChat(SYSTEM, request.excerpt(), scenes.getPetModel(), scenes.getOllamaPort(),
+        String text = model.sceneChat(SYSTEM, request.excerpt(), scenes.getPetModel(),
                 scenes.getPetTemperature(), scenes.getPetMaxTokens()).strip();
         return ApiResponse.ok(text.isEmpty() || text.length() > 64 || text.matches("(?s).*[\\r\\n<>`].*") ? "" : text);
     }

@@ -1,24 +1,26 @@
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Input,Modal,Select,Space,Table} from 'antd';
-import {Bot,Brain,Check,Eye,Play,Plus} from 'lucide-react';
-import {request,fetchLlmModelsForRiskPage,fetchDetectionModelsForRiskPage,fetchPromptTemplatesForRiskPage} from '../api';
+import {Brain,Check,Cloud,Eye,Play,Plus} from 'lucide-react';
+import {request,fetchApiModelsForRiskPage,fetchLlmModelsForRiskPage,fetchDetectionModelsForRiskPage,fetchPromptTemplatesForRiskPage} from '../api';
 import {ResultPage,type RiskResultSummary} from '../pages/RiskPage';
 
 type Booking={id:string;patientId:number;name:string;scheduledAt:string;state:string;shared:boolean;snapshotVersion:string};
 type Report=RiskResultSummary & {posts:{text:string;date?:string}[];model?:string;modelName:string;encoder?:string;promptName?:string;total:number;snapshotVersion:string;processingTimeMs:number};
-const categories=[{id:'local_llm',name:'本地 LLM',Icon:Bot},{id:'emocc',name:'检测模型',Icon:Brain}] as const;
+const categories=[{id:'api',name:'大模型',Icon:Cloud},{id:'emocc',name:'检测模型',Icon:Brain}] as const;
 type Category=typeof categories[number]['id'];
 const detectorDisplayName=(name:string)=>name.replace(/-weibo$/i,'');
 type Task={id:string;booking:string;version:string;name:string;category:Category;modelId:string;modelName:string;templateId?:string;createdAt:string;status:'待执行'|'分析中'|'已完成'|'失败';result?:Report;error?:string};
 async function loadOptions(){
- const [local,detection,templates]=await Promise.all([fetchLlmModelsForRiskPage(),fetchDetectionModelsForRiskPage(),fetchPromptTemplatesForRiskPage()]);
+ const [detection,templates]=await Promise.all([fetchDetectionModelsForRiskPage(),fetchPromptTemplatesForRiskPage()]);
  const key=(value?:string)=>value?.toLowerCase().replace(/[^a-z0-9]/g,'');
  const weiboModels=detection.filter(m=>{
   if(m.status!=='active'||(m.type!=='emoji'&&m.type!=='fealearner'))return false;
   const expected=m.type==='emoji'?'emoccweibo':'fealearnerweibo';
   return m.supportedDatasets?.length ? m.supportedDatasets.some(ds=>ds.trim().toLowerCase()==='weibo') : key(m.modelCode)===expected||key(m.name)===expected;
  });
- return {local_llm:local.filter(m=>m.status==='active'),emocc:weiboModels.map(m=>({...m,name:detectorDisplayName(m.name)})),templates};
+ const policy=await request<{allowExternalModels:boolean}>('/api/care/review-policy');
+ const api=policy.allowExternalModels ? await fetchApiModelsForRiskPage() : [];
+ return {api:api.filter(m=>m.status==='active'),emocc:weiboModels.map(m=>({...m,name:detectorDisplayName(m.name)})),templates};
 }
 const eligible=(b:Booking)=>b.state==='ACCEPTED'&&!!b.shared&&!!b.snapshotVersion;
 
@@ -26,7 +28,7 @@ export default function DoctorRiskDesk(){
  const [bookings,setBookings]=useState<Booking[]>([]),[tasks,setTasks]=useState<Task[]>([]),[error,setError]=useState(''),[loading,setLoading]=useState(true);
  const [open,setOpen]=useState(false),[booking,choose]=useState<string>(),[name,setName]=useState(''),[detail,inspect]=useState<string>(),[patient,filterUser]=useState<number>(),[status,filterStatus]=useState<string>();
  const [options,setOptions]=useState<Awaited<ReturnType<typeof loadOptions>>>(),[configError,setConfigError]=useState('');
- const [category,setCategory]=useState<Category>('local_llm'),[modelId,setModelId]=useState<string>(),[templateId,setTemplateId]=useState<string>();
+ const [category,setCategory]=useState<Category>('api'),[modelId,setModelId]=useState<string>(),[templateId,setTemplateId]=useState<string>();
  useEffect(()=>{if(!open)return;let current=true;setOptions(undefined);setConfigError('');
   loadOptions().then(value=>{if(current)setOptions(value)}).catch(()=>{if(current)setConfigError('无法加载模型配置，请关闭弹窗后重试。')});
   return()=>{current=false};},[open]);

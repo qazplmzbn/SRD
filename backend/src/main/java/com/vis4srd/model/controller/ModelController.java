@@ -62,33 +62,6 @@ public class ModelController {
         return ApiResponse.ok(modelService.getInferenceHistory(modelId, Math.min(Math.max(limit, 1), 100)));
     }
 
-    @GetMapping("/ollama/status")
-    public ApiResponse<Map<String, Object>> getOllamaStatus(
-            @RequestParam(name = "base_url", required = false) String baseUrl) {
-        return ApiResponse.ok(modelService.checkOllamaHealth(baseUrl));
-    }
-
-    @GetMapping("/ollama/models")
-    public ApiResponse<Map<String, Object>> listOllamaModels(
-            @RequestParam(name = "base_url", required = false) String baseUrl) {
-        String url = StringUtils.hasText(baseUrl) ? baseUrl : ModelService.DEFAULT_OLLAMA_URL;
-        Map<String, Object> result = modelService.listOllamaAvailableModels(url);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("models", result.getOrDefault("models", List.of()));
-        data.put("base_url", modelService.normalizeOllamaBaseUrl(url));
-        boolean ok = Boolean.TRUE.equals(result.get("success"));
-        if (ok) {
-            return ApiResponse.ok(data);
-        }
-        Object error = result.get("error");
-        return new ApiResponse<>(false, data, error == null ? null : String.valueOf(error));
-    }
-
-    @GetMapping("/ollama/configured")
-    public ApiResponse<List<Map<String, Object>>> getConfiguredOllamaModels() {
-        return ApiResponse.ok(modelService.getConfiguredOllamaModels());
-    }
-
     @GetMapping("/providers")
     public ApiResponse<List<Map<String, Object>>> getProviders() {
         return ApiResponse.ok(modelService.listProviders());

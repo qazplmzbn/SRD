@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {Alert,Button,Modal,Select,Space,Table} from 'antd';
 import {FolderPlus} from 'lucide-react';
 import {request} from '../api';
+import {readCloud} from '../researchCloud';
 import {useAuthStore} from '../store/authStore';
 import ArchivePage from '../pages/ArchivePage';
 import type {Grid} from './FreeDataset';
@@ -12,8 +13,14 @@ const key=(s:Source)=>`${s.kind}/${encodeURIComponent(s.id)}`;
 function PersonalArchives({id}:{id:string}) {
   type Group={subject:string;posts:{text:string;label:string|number}[]};
   const [groups,setGroups]=useState<Group[]>(),[error,setError]=useState('');
+  const [family,setFamily]=useState('emocc'),[running,setRunning]=useState(false);
+  const [report,setReport]=useState<{subject:string;riskLevel:string;summary:string}>();
+  function analyze(subject:string){
+    const cloud=readCloud(Number(useAuthStore.getState().user?.id));
+    if(!cloud){setError('请先在个人模型配置中应用自有档案报告模型、API Key 和提示词');return}
+    Modal.confirm({title:`分析 ${subject} 的贴文？`,content:`最多 32 条贴文将发送至 ${cloud.provider} (${cloud.model})。${family==='emocc'?'Emocc 还会将原文发送至部署配置的表情生成服务。':''}请确认已获得授权。`,okText:'同意并分析',onOk:async()=>{setRunning(true);setReport(undefined);setError('');try{const result=await request<{riskLevel:string;summary:string}>(`/api/research/archives/version/${encodeURIComponent(id)}/review`,{method:'POST',body:JSON.stringify({subject,family,cloud,consent:true})});setReport({subject,...result})}catch(e){setError((e as Error).message)}finally{setRunning(false)}}})}
   useEffect(()=>{const c=new AbortController();request<Group[]>(`/api/research/archives/version/${encodeURIComponent(id)}`,{signal:c.signal}).then(setGroups).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>c.abort()},[id]);
-  return <>{error&&<Alert type="error" message={error}/>}<Table rowKey="subject" loading={!groups&&!error} dataSource={groups} columns={[{title:'样本账号',dataIndex:'subject'},{title:'贴文数',render:(_,r)=>r.posts.length}]} expandable={{expandedRowRender:r=><ol>{r.posts.map((p,i)=><li key={i} style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{p.text} · 标签 {p.label}</li>)}</ol>}}/></>;
+  return <><Select aria-label="分析模型" value={family} onChange={setFamily} options={[{value:'api',label:'大模型'},{value:'emocc',label:'Emocc-Weibo'},{value:'fealearner',label:'FeaLearner-Weibo'}]}/>{error&&<Alert type="error" message={error}/>} {report&&<Alert message={`${report.subject} · ${report.riskLevel}`} description={report.summary}/>}<Table rowKey="subject" loading={!groups&&!error} dataSource={groups} columns={[{title:'样本账号',dataIndex:'subject'},{title:'贴文数',render:(_,r)=>r.posts.length},{title:'检测报告',render:(_,r)=><Button disabled={running} onClick={()=>analyze(r.subject)}>生成报告</Button>}]} expandable={{expandedRowRender:r=><ol>{r.posts.map((p,i)=><li key={i} style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{p.text} · 标签 {p.label}</li>)}</ol>}}/></>;
 }
 export default function ResearchArchives({versions}:{versions:{id:string;name:string;versionName:string;ownerId:number}[]}) {
   const owner=useAuthStore(s=>s.user?.id);

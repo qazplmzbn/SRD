@@ -25,8 +25,7 @@ public class CareController {
     private final ObjectMapper json;
     private final String invite;
     @Autowired private com.vis4srd.risk.service.RiskService riskService;
-    @Value("${app.python-inference.fallback-heuristic:true}") private boolean fallback;
-    @Value("${app.python-inference.base-url:http://127.0.0.1:8001}") private String inferenceBase;
+    @Autowired private com.vis4srd.risk.service.PostReviewService reviews;
     @Value("${CARE_ALLOW_EXTERNAL_MODELS:false}") private boolean allowExternalModels;
     public CareController(@Qualifier("mysqlJdbcTemplate") JdbcTemplate db, ObjectMapper json,
                           @Value("${DOCTOR_CERTIFICATION_INVITE_CODE:}") String invite) {
@@ -74,7 +73,7 @@ public class CareController {
     }
     private String reviewInput(String id,long doctor){var rows=db.queryForList("SELECT COALESCE(a.snapshot,JSON_OBJECT('posts',JSON_ARRAY(),'results',JSON_ARRAY())) FROM care_appointments a JOIN care_doctors d ON d.doctor_id=a.doctor_id JOIN app_users p ON p.id=a.patient_id AND p.role='user' WHERE a.id=? AND a.doctor_id=? AND a.state='ACCEPTED'",String.class,id,doctor);if(rows.isEmpty())throw unavailable();return rows.get(0);}
     public record ReviewSelection(@Positive long modelId, Long templateId,
-                                  @NotBlank @Pattern(regexp="local_llm|emocc", message="医生预约任务仅支持本地大模型或检测模型") String category,
+                                  @NotBlank @Pattern(regexp="api|emocc", message="未知模型类别") String category,
                                   @NotBlank @Pattern(regexp="(?i)[a-f0-9]{64}") String snapshotVersion) {}
     @GetMapping("/review-policy") public ApiResponse<?> reviewPolicy() {
         actor("doctor");
@@ -103,32 +102,7 @@ public class CareController {
 
     private com.fasterxml.jackson.databind.node.ObjectNode reviewEmocc(long modelId,List<String> texts)throws Exception {
         var detector=riskService.requireAppointmentDetector(modelId);
-        String modelName=detector.name();
-        var req=java.net.http.HttpRequest.newBuilder(java.net.URI.create(inferenceBase+"/infer/appointment-review")).timeout(java.time.Duration.ofSeconds(90)).header("Content-Type","application/json").POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.writeValueAsString(Map.of("posts",texts,"model",detector.family())))).build();
-        var evidence=riskService.aggregateHeuristic(texts);
-        var output=json.createObjectNode();
-        try {
-            var result=java.net.http.HttpClient.newHttpClient().send(req,java.net.http.HttpResponse.BodyHandlers.ofString());
-            if(result.statusCode()!=200)throw new java.io.IOException();
-            output=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(result.body());
-            output.put("modelName",modelName);
-            if (detector.family().equals("fealearner") && !"FeaLearner-Weibo".equals(output.path("model").asText())) throw new java.io.IOException();
-            output.put("modelType",detector.family()+"_local");
-        } catch(java.io.IOException e) {
-            if(detector.family().equals("fealearner")) throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"FeaLearner 微博推理失败，请检查本地 BERT、词典、模型权重及侧车版本");
-            if(!fallback)throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"本机推理服务不可用，未启用规则回退");
-            output.put("modelName",modelName);
-            output.put("inferenceBackend","heuristic_fallback");
-            output.set("riskLevel",json.valueToTree(evidence.get("riskLevel")));
-            output.set("riskScore",json.valueToTree(evidence.get("riskScore")));
-        }
-        if (!Set.of("low","medium","high").contains(output.path("riskLevel").asText()) || !output.path("riskScore").isNumber()
-                || !(output.path("riskScore").asDouble() >= 0 && output.path("riskScore").asDouble() <= 1))
-            throw new BusinessException("未返回有效的检测等级和分数");
-        output.put("summary", "检测完成，风险等级：" + output.path("riskLevel").asText());
-        var fields=json.convertValue(output,new com.fasterxml.jackson.core.type.TypeReference<LinkedHashMap<String,Object>>(){});
-        riskService.enrichAppointmentDetection(fields,texts,detector.family(),allowExternalModels);
-        return json.valueToTree(fields);
+        return json.valueToTree(reviews.review(texts,detector.family(),detector.name(),allowExternalModels));
     }
     @PutMapping("/appointments/{id}/live/sync")
     public ApiResponse<Boolean> sync(@PathVariable String id,@Valid @RequestBody Snapshot snapshot) throws Exception {

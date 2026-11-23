@@ -20,6 +20,24 @@ import org.springframework.web.bind.annotation.*;
 public class ResearchArchiveController {
     private final JdbcTemplate jdbc;
     private final ResearchVersionService versions;
+    @org.springframework.beans.factory.annotation.Autowired private com.vis4srd.risk.service.PostReviewService reviews;
+    @org.springframework.beans.factory.annotation.Autowired private com.vis4srd.risk.service.RiskService risk;
+
+    public record Analysis(String subject,String family,boolean consent,com.vis4srd.risk.service.RiskService.ResearchCloud cloud) {}
+    @PostMapping("/version/{id}/review")
+    public ApiResponse<?> review(@PathVariable String id,@RequestBody Analysis request) throws Exception {
+        if (!request.consent()) throw new BusinessException(HttpStatus.FORBIDDEN,"需要同意发送所选账号的贴文");
+        var rows=jdbc.queryForList("SELECT posts_json FROM research_archive_subjects WHERE owner_id=? AND version_id=? AND subject=?",String.class,versions.actor(),id,request.subject());
+        if(rows.isEmpty()) throw new BusinessException(HttpStatus.NOT_FOUND,"未找到自有档案");
+        var texts=new java.util.ArrayList<String>();
+        for(var post:new com.fasterxml.jackson.databind.ObjectMapper().readTree(rows.get(0))) {
+            if(texts.size()==32)break;
+            String text=post.path("text").asText(""); if(!text.isBlank())texts.add(text);
+        }
+        if(request.cloud()==null) throw new BusinessException("请先填写个人云端报告模型配置");
+        if ("api".equals(request.family())) return ApiResponse.ok(risk.analyzeOwnedPosts(texts,request.cloud()));
+        return ApiResponse.ok(reviews.review(texts,request.family(),"emocc".equals(request.family())?"Emocc-Weibo":"FeaLearner-Weibo",true,request.cloud()));
+    }
 
     public ResearchArchiveController(@Qualifier("mysqlJdbcTemplate") JdbcTemplate jdbc, ResearchVersionService versions) {
         this.jdbc = jdbc;
