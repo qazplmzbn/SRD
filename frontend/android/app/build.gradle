@@ -5,6 +5,8 @@ android {
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.vis4srd.companion"
+        manifestPlaceholders.douyinCallbackHost = providers.environmentVariable("DOUYIN_ANDROID_CALLBACK_HOST").getOrElse("disabled.invalid")
+        resValue "string", "douyin_callback_host", manifestPlaceholders.douyinCallbackHost
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

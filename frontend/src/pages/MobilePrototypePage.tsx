@@ -1,6 +1,7 @@
 import MobilePlatformSync from '../components/MobilePlatformSync';
 import DailyFeed from '../components/DailyFeed';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {androidCallbackPath,androidOAuth,hasAndroidOAuth,takeAndroidCallback,type DouyinCallback} from '../components/douyinOAuth';
 import { CalendarDays, HeartPulse, MessageCircle, UserRound, Settings, ChevronRight, FileText, ClipboardList, Stethoscope, Download, Upload, Shield, Cat, ArrowLeft, Pencil } from 'lucide-react';
 import './mobile-prototype.css';
 import './mobile-library.css';
@@ -34,14 +35,36 @@ function MobileContent(){
    setNotice('');
  };
  useLayoutEffect(()=>{if(main.current)main.current.scrollTop=restore.current;restore.current=0},[panel,tab]);
- useEffect(()=>{if(location.pathname.endsWith('/sync')||new URL(location.href).searchParams.has('state'))setPanel('imports')},[]);
+ const [androidCallback,setAndroidCallback]=useState<DouyinCallback|null>(null);
+ const onCallbackHandled=useCallback(()=>setAndroidCallback(null),[]);
+ useEffect(()=>{
+   if(location.pathname===androidCallbackPath){
+     window.history.replaceState(window.history.state,'',androidCallbackPath);
+     return;
+   }
+   if(location.pathname.endsWith('/sync')||new URL(location.href).searchParams.has('state'))setPanel('imports');
+ },[]);
+ useEffect(()=>{
+   if(!hasAndroidOAuth())return;
+   let live=true;
+   const listener=Promise.resolve().then(()=>{
+     if(!live)return;
+     return androidOAuth.addListener('callback',({url})=>{
+       if(!live)return;
+       const callback=takeAndroidCallback(url);
+       if(callback){setAndroidCallback(callback);setPanel('imports');}
+     });
+   });
+   void listener.catch(()=>{});
+   return()=>{live=false;void listener.then(handle=>handle?.remove()).catch(()=>{});};
+ },[]);
  useEffect(()=>{const old=document.title;document.title='小日常';return()=>{document.title=old}},[]);
  const titles:Record<string,string>={profile:'编辑资料',records:'日常记录',weibo:'导入微博',assess:'心理测评',history:'测评记录',doctors:'联系医生',appointments:'我的预约',settings:'设置',privacy:'隐私与安全',imports:'一键导入',platforms:'平台授权',account:'账号安全',pet:'桌宠伙伴',about:'关于小日常'};
  const backup=()=>{const blob=new Blob([JSON.stringify(records,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='我的日常记录.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setNotice('已导出日常记录')};
  const entries=[{name:'测评记录',icon:ClipboardList,action:()=>open('history')},{name:'我的预约',icon:Stethoscope,action:()=>open('appointments')},{name:'桌宠伙伴',icon:Cat,action:()=>open('pet')}];
 return <div className={`mobile-prototype m-redesign ${tab==='chat'&&!panel?'m-chat-active':''}`}>{panel&&<header><button className="m-back" aria-label={`返回，当前为${titles[panel]}`} onClick={()=>open('')}><ArrowLeft size={20}/>返回</button></header>}<main ref={main}>{storageError&&<p role="alert">{storageError}</p>}{notice&&<p role="status" className="m-notice">{notice}</p>}
   {!panel&&tab==='daily'&&<DailyFeed local={records}/>}
-  {panel==='imports'&&<MobilePlatformSync onLogin={()=>open('account')}/>}
+  {panel==='imports'&&<MobilePlatformSync onLogin={()=>open('account')} androidCallback={androidCallback} onCallbackHandled={onCallbackHandled}/>}
  <div hidden={!!panel||tab!=='chat'}><MobileChat visible={!panel && tab === "chat"}/></div>
  {!panel&&tab==='mine'&&<><section className="m-profile"><button className="m-avatar" onClick={()=>{setDraft(profile);open('profile')}}>{profile.avatar}</button><div><h2>{profile.name}<button aria-label="编辑资料" onClick={()=>{setDraft(profile);open('profile')}}><Pencil size={15}/></button></h2><p>{profile.bio}</p><span className="m-local-label">本机个人资料</span></div></section><div className="m-icon-grid" style={{gridTemplateColumns:'repeat(3,1fr)'}}>{entries.map(e=><button key={e.name} onClick={e.action}><e.icon size={25}/><span>{e.name}</span></button>)}</div><section className="m-section"><h2>更多服务</h2>{[{name:'隐私与安全',icon:Shield,p:'privacy'},{name:'设置',icon:Settings,p:'settings'},{name:'关于小日常',icon:HeartPulse,p:'about'}].map(e=><button className="m-menu-row" key={e.p} onClick={()=>open(e.p)}><e.icon/><span>{e.name}</span><ChevronRight size={18}/></button>)}</section></>}
  {panel==='profile'&&<form className="mobile-records m-section" onSubmit={e=>{e.preventDefault();saveProfile(draft)}}><div className="m-avatar-options">{['🌷','🌻','🌿','🐱','🐰','🐻'].map(a=><button type="button" key={a} aria-pressed={draft.avatar===a} onClick={()=>setDraft({...draft,avatar:a})}>{a}</button>)}</div><label>昵称<input required maxLength={20} value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})}/></label><label>个人签名<input maxLength={60} value={draft.bio} onChange={e=>setDraft({...draft,bio:e.target.value})}/></label><button className="m-primary" disabled={!draft.name.trim()}>保存资料</button></form>}

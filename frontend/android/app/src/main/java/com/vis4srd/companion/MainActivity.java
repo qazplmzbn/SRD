@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TextSharePlugin.class);
+        registerPlugin(DouyinOAuthPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

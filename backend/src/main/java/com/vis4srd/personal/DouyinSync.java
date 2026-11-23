@@ -35,8 +35,8 @@ public class DouyinSync {
                    v.newest_create_time AS newestCreateTime,v.upstream_has_more AS upstreamHasMore,v.finished AS initialFinished
             FROM douyin_connections c LEFT JOIN douyin_sync_coverage v ON v.owner_id=c.owner_id AND v.generation=c.generation
             WHERE c.owner_id=?
-            """,id);return ApiResponse.ok(Map.of("available",client.available(),"connection",rows));}
-    @PostMapping("/start") public ApiResponse<?> start(){long id=owner();if(!client.available())throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"抖音同步尚未开放");String nonce=UUID.randomUUID().toString();db.update("INSERT INTO douyin_auth_state(owner_id,nonce,expires) VALUES(?,?,?) ON DUPLICATE KEY UPDATE nonce=VALUES(nonce),expires=VALUES(expires)",id,nonce,System.currentTimeMillis()+600000);return ApiResponse.ok(Map.of("url",client.authorize(nonce)));}
+            """,id);return ApiResponse.ok(Map.of("available",client.available(),"connection",rows,"androidRedirect",client.androidRedirect().orElse("")));}
+    @PostMapping("/start") public ApiResponse<?> start(@RequestParam(defaultValue="false") boolean android){long id=owner();if(!client.available()||(android&&client.androidRedirect().isEmpty()))throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"当前端的抖音授权尚未开放");String nonce=UUID.randomUUID().toString();db.update("INSERT INTO douyin_auth_state(owner_id,nonce,expires) VALUES(?,?,?) ON DUPLICATE KEY UPDATE nonce=VALUES(nonce),expires=VALUES(expires)",id,nonce,System.currentTimeMillis()+600000);return ApiResponse.ok(Map.of("url",client.authorize(nonce,android)));}
     record Callback(String code,String state){}
     @PostMapping("/finish") public ApiResponse<?> finish(@RequestBody Callback form){long id=owner();if(!client.available()||form.code()==null||form.code().isBlank()||form.code().length()>1024)throw new BusinessException(HttpStatus.BAD_REQUEST,"授权无效");
         return tx.execute(t->{if(db.update("DELETE FROM douyin_auth_state WHERE owner_id=? AND nonce=? AND expires>?",id,form.state(),System.currentTimeMillis())!=1)throw new BusinessException(HttpStatus.BAD_REQUEST,"授权已失效，请重新连接");

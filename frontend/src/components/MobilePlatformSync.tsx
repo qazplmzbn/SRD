@@ -1,10 +1,11 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {Link2,RefreshCw} from 'lucide-react';
 import {Capacitor} from '@capacitor/core';
 import {mobileCall,readSession} from './mobileSession';
+import {androidOAuth,hasAndroidOAuth,openAndroidOAuth,type DouyinCallback} from './douyinOAuth';
 const api='/api/me/sync/douyin';
 type Connection={status:string;lastSuccess:number;initialPages?:number;initialItems?:number;oldestCreateTime?:number;newestCreateTime?:number;upstreamHasMore?:boolean;initialFinished?:boolean};
-type Status={available:boolean;connection:Connection[]};
+type Status={available:boolean;connection:Connection[];androidRedirect?:string};
 type Page={items:{id:string;content:string;source:string;publishedAt?:string}[];total:number};
 const labels:Record<string,string>={SYNCING:'正在同步',CURRENT:'最近一轮同步已完成',RETRY:'同步暂未成功，稍后重试',REAUTHORIZE:'需要重新授权'};
 function WeiboConnection(){
@@ -18,11 +19,41 @@ function WeiboConnection(){
  {(!c||['PENDING','NO_PERMISSION','REAUTHORIZE'].includes(c.status))&&<><p>授权保存本人微博、媒体信息及平台返回的互动计数。</p><button disabled={!state?.available||busy} onClick={()=>change(false)}><Link2 size={16}/>{c?.status==='PENDING'?'重新获取授权码':'连接微博'}</button></>}
  {c&&<><label><input type="checkbox" checked={erase} onChange={e=>setErase(e.target.checked)}/>同时删除已同步的微博记录</label><button disabled={busy} onClick={()=>change(true)}>断开微博连接</button></>}</>;
 }
-export default function MobilePlatformSync({onLogin}:{onLogin:()=>void}){
+export default function MobilePlatformSync({onLogin,androidCallback,onCallbackHandled}:{onLogin:()=>void;androidCallback:DouyinCallback|null;onCallbackHandled:()=>void}){
  const [status,setStatus]=useState<Status>(),[error,setError]=useState(''),[page,setPage]=useState(1),[posts,setPosts]=useState<Page>(),[busy,setBusy]=useState(false),[erase,setErase]=useState(false),[revision,reload]=useState(0);
+ const [androidRedirect,setAndroidRedirect]=useState('');
+ const lastCallback=useRef<string>();
+ const native=Capacitor.isNativePlatform();
+ const available=!!status?.available&&(!native||!!androidRedirect&&status.androidRedirect===androidRedirect);
+ useEffect(()=>{if(!hasAndroidOAuth())return;let live=true;androidOAuth.getRedirect().then(({url})=>{if(live)setAndroidRedirect(url)}).catch(()=>{});return()=>{live=false}},[]);
  useEffect(()=>{if(!readSession())return;let live=true;const load=async()=>{try{const [s,p]=await Promise.all([mobileCall<Status>(api),mobileCall<Page>(`/api/me/posts?page=${page}&pageSize=20`)]);if(live){setStatus(s);setPosts(p)}}catch(e){if(live)setError((e as Error).message)}};void load();const timer=setInterval(load,15000);return()=>{live=false;clearInterval(timer)}},[page,revision]);
- useEffect(()=>{const url=new URL(location.href);if(!url.searchParams.has('state'))return;const code=url.searchParams.get('code'),state=url.searchParams.get('state');for(const k of ['code','state','error','error_description','scopes'])url.searchParams.delete(k);history.replaceState(null,'',url);if(!code){setError('授权未完成');return}setBusy(true);mobileCall(api+'/finish','POST',{code,state}).then(()=>reload(n=>n+1)).catch(e=>setError(e.message)).finally(()=>setBusy(false))},[]);
- async function connect(){setBusy(true);setError('');try{const r=await mobileCall<{url:string}>(api+'/start','POST');location.assign(r.url)}catch(e){setBusy(false);setError((e as Error).message)}}
+ useEffect(()=>{
+   let callback=androidCallback;
+   if(!native){
+     const url=new URL(location.href),state=url.searchParams.get('state');
+     if(!state)return;
+     callback={state,code:url.searchParams.get('code')};
+     for(const k of ['code','state','error','error_description','scopes'])url.searchParams.delete(k);
+     history.replaceState(history.state,'',url);
+   }
+   if(!callback||lastCallback.current===callback.state)return;
+   lastCallback.current=callback.state;
+   if(native)onCallbackHandled();
+   if(!callback.code){setError('授权未完成');return;}
+   setError('');setBusy(true);
+   mobileCall(api+'/finish','POST',callback).then(()=>reload(n=>n+1)).catch(e=>setError(e.message)).finally(()=>setBusy(false));
+ },[native,androidCallback,onCallbackHandled]);
+ async function connect(){
+   if(busy||!available)return;
+   const token=readSession()?.token;
+   setBusy(true);setError('');
+   try{
+     const r=await mobileCall<{url:string}>(api+'/start'+(native?'?android=true':''),'POST');
+     if(readSession()?.token!==token)throw Error('账号已切换');
+     if(native)await openAndroidOAuth(r.url,androidRedirect);
+     else location.assign(r.url);
+   }catch(e){setError((e as Error).message)}finally{setBusy(false)}
+ }
  async function stop(){if(!confirm(erase?'断开并删除此账号已同步的抖音记录？':'停止自动同步并保留已有记录？'))return;setBusy(true);try{await mobileCall(api+'?erase='+erase,'DELETE');setErase(false);setPage(1);reload(n=>n+1)}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
  const c=status?.connection[0];
  const day=(seconds:number)=>new Date(seconds*1000).toLocaleDateString();
@@ -30,12 +61,12 @@ export default function MobilePlatformSync({onLogin}:{onLogin:()=>void}){
    <h2>平台同步</h2>{error&&<p role="alert">{error}</p>}
    {!readSession()?<button onClick={onLogin}>登录个人账号</button>:<>
      <h3>抖音</h3>
-     <p role="status">{c?labels[c.status]:!status?'正在读取连接状态':!status.available?'暂未开放':Capacitor.isNativePlatform()?'请通过移动网页版连接':'未连接'}</p>
+      <p role="status">{c?labels[c.status]:!status?'正在读取连接状态':!status.available?'暂未开放':!available?'请通过移动网页版连接':'未连接'}</p>
      {!!c?.lastSuccess&&<p>上次同步：{new Date(c.lastSuccess).toLocaleString()}</p>}
      {!!c?.initialPages&&<p>首次同步{c.initialFinished?'范围':'进度'}：已读取 {c.initialPages} 页、{c.initialItems} 条返回记录。
        {!!c.oldestCreateTime&&!!c.newestCreateTime&&<>发布时间：{day(c.oldestCreateTime)} 至 {day(c.newestCreateTime)}。</>}
        {c.initialFinished&&c.upstreamHasMore?'已到本次页数上限，平台仍有后续记录。':'此范围不代表全部历史。'}</p>}
-     {(!c||c.status==='REAUTHORIZE')&&<><p>授权将本人作品信息及平台返回的互动计数保存到个人账号，不授权医生查看或模型分析。</p><button disabled={busy||!status?.available||Capacitor.isNativePlatform()} onClick={connect}><Link2 size={16}/> 连接抖音</button></>}
+      {(!c||c.status==='REAUTHORIZE')&&<><p>授权将本人作品信息及平台返回的互动计数保存到个人账号，不授权医生查看或模型分析。</p><button disabled={busy||!available} onClick={connect}><Link2 size={16}/> 连接抖音</button></>}
      {c&&<><label><input type="checkbox" checked={erase} onChange={e=>setErase(e.target.checked)}/>同时删除已同步的抖音记录</label><button disabled={busy} onClick={stop}>断开连接</button></>}
      <WeiboConnection/><h3>账号记录 {posts?.total??''}</h3><button aria-label="刷新同步状态" onClick={()=>reload(n=>n+1)}><RefreshCw size={16}/></button>
      {posts?.items.map(p=><article className="mobile-post" key={p.id}><small>{p.source} · {p.publishedAt?new Date(p.publishedAt).toLocaleDateString():'时间未知'}</small><p>{p.content||'无作品文案'}</p></article>)}

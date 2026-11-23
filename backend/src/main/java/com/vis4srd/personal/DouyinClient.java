@@ -18,17 +18,26 @@ import java.util.stream.Collectors;
 class DouyinClient {
     private static final String BASE="https://open.douyin.com";
     private final HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-    private final String key,secret,redirect;
+    private final String key,secret,redirect,androidRedirect;
     private final byte[] encryptionKey;
     private final boolean requestMetrics;
     private final ObjectMapper json;
     DouyinClient(Environment env,ObjectMapper json){
         this.json=json;key=env.getProperty("DOUYIN_CLIENT_KEY","");secret=env.getProperty("DOUYIN_CLIENT_SECRET","");redirect=env.getProperty("DOUYIN_REDIRECT_URI","");
+        androidRedirect=env.getProperty("DOUYIN_ANDROID_REDIRECT_URI","");
         encryptionKey=Base64.getDecoder().decode(env.getProperty("DOUYIN_TOKEN_KEY",""));
         requestMetrics=env.getProperty("DOUYIN_VIDEO_DATA_ENABLED",Boolean.class,false);
     }
     boolean available(){return !key.isBlank()&&!secret.isBlank()&&redirect.startsWith("https://")&&encryptionKey.length==32;}
-    String authorize(String nonce){return UriComponentsBuilder.fromHttpUrl(BASE+"/platform/oauth/connect/").queryParam("client_key",key).queryParam("response_type","code").queryParam("scope",requestMetrics?"video.list,video.data":"video.list").queryParam("redirect_uri","{redirect}").queryParam("state",nonce).encode().buildAndExpand(redirect).toUriString();}
+    Optional<String> androidRedirect(){
+        try {
+            URI uri=URI.create(androidRedirect);
+            if(available()&&"https".equals(uri.getScheme())&&uri.getHost()!=null&&uri.getPort()==-1&&uri.getUserInfo()==null
+                &&"/mobile/douyin/android-callback".equals(uri.getRawPath())&&uri.getRawQuery()==null&&uri.getRawFragment()==null) return Optional.of(androidRedirect);
+        } catch(IllegalArgumentException ignored) {}
+        return Optional.empty();
+    }
+    String authorize(String nonce,boolean android){return UriComponentsBuilder.fromHttpUrl(BASE+"/platform/oauth/connect/").queryParam("client_key",key).queryParam("response_type","code").queryParam("scope",requestMetrics?"video.list,video.data":"video.list").queryParam("redirect_uri","{redirect}").queryParam("state",nonce).encode().buildAndExpand(android?androidRedirect().orElseThrow():redirect).toUriString();}
     record Tokens(String account,String access,String refresh,long expires,boolean metrics){Tokens(String account,String access,String refresh,long expires){this(account,access,refresh,expires,false);}}
     Tokens exchange(String code)throws Exception{return token("access_token",Map.of("client_key",key,"client_secret",secret,"code",code,"grant_type","authorization_code"));}
     Tokens refresh(String token)throws Exception{return token("refresh_token",Map.of("client_key",key,"refresh_token",token,"grant_type","refresh_token"));}
