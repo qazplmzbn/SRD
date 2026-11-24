@@ -23,7 +23,7 @@ export default function DoctorVerificationReviewPage() {
     finally { setSaving(false); }
   };
   return <div className="pro-page">
-    <div className="pro-page-heading"><div><div className="pro-eyebrow">PLATFORM REVIEW</div><h1>医生认证审核</h1><p className="pro-muted">核查资质材料、记录处理依据，控制医生服务权限。</p></div></div>
+    <h1 className="sr-only">医生认证审核</h1>
     <section className="pro-panel"><Space style={{ marginBottom: 18 }} wrap><span>申请状态</span><Select aria-label="申请状态" value={status} style={{ width: 150 }} options={[{ value: 'ALL', label: '全部' }, ...Object.entries(verificationLabels).map(([value, label]) => ({ value, label }))]} onChange={value => { setStatus(value); setPage(1); }} /></Space>
       {loading ? <Spin /> : error ? <Alert type="error" showIcon message={error} /> : !items.length ? <Empty description="暂无此状态的认证申请" /> : <>{items.map(item => <article className="pro-review-item" key={item.id}><div><Space><strong>{item.realName}</strong><Tag>{verificationLabels[item.status]}</Tag></Space><p className="pro-muted">{item.institution} · {item.qualification}</p><p className="pro-muted">提交于 {new Date(item.submittedAt).toLocaleString()}</p></div><Button onClick={() => setSelected(item)}>查看申请</Button></article>)}<Pagination style={{ marginTop: 20 }} current={page} pageSize={20} total={total} showSizeChanger={false} onChange={setPage} /></>}
     </section>

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
+import AdminLayout from './AdminLayout';
 import { Alert, Button, Spin } from 'antd';
 import ProfessionalLayout from './ProfessionalLayout';
 import { useAuthStore } from '../../store/authStore';
-import { canUseResearch } from '../../access';
+import { canOpenSection, canUseResearch } from '../../access';
 import { fetchMe } from '../../api';
 import './professional.css';
 
@@ -29,6 +30,12 @@ export default function Layout() {
     return () => { active = false; window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, [location.pathname, updateUser, retry]);
   if (!ready) return <div className="p-8">{error ? <Alert type="error" message={error} action={<Button onClick={() => setRetry(v => v + 1)}>重试</Button>} /> : <Spin tip="正在读取账号权限"><div style={{height:100}} /></Spin>}</div>;
+  if (role === 'admin') {
+    if (/^\/admin(\/|$)/.test(location.pathname)) return <AdminLayout />;
+    const aliases: Record<string, string> = { '/appointments': '/admin/appointments', '/model-config': '/admin/config', '/model-config/template': '/admin/config/template' };
+    if (aliases[location.pathname]) return <Navigate to={aliases[location.pathname]} replace />;
+    if (!canOpenSection(location.pathname.split('/')[1], role)) return <Navigate to="/home" replace />;
+  }
   if (canUseResearch(role)) return <ProfessionalLayout />;
   return <div className="p-8"><Alert type="warning" showIcon message="此账号没有专业工作台访问权限" description="个人账号请使用移动端。" action={<Button onClick={clearSession}>切换账号</Button>} /></div>;
 }

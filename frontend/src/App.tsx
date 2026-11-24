@@ -21,9 +21,11 @@ import RegisterPage from './pages/RegisterPage';
 import ProfilePage from './pages/ProfilePage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import PersonalPostsPage from './pages/PersonalPostsPage';
-import CareWorkspace, {DoctorInvite} from './components/CareWorkspace';
+import CareWorkspace from './components/CareWorkspace';
+import DoctorCertificationPage from './pages/DoctorCertificationPage';
 import MobilePrototypePage from './pages/MobilePrototypePage';
-import AdminWorkspacePage from './pages/AdminWorkspacePage';
+import AdminAppointmentsPage from './pages/AdminAppointmentsPage';
+import PersonalModelSettings from './pages/PersonalModelSettings';
 import DoctorVerificationReviewPage from './pages/DoctorVerificationReviewPage';
 import ResearchDataPage from './pages/ResearchDataPage';
 import CareUsersPage from './pages/CareUsersPage';
@@ -38,7 +40,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
   const section = location.pathname.split('/')[1].replace('model-center', 'model');
-  if (!canOpenSection(section, user?.role)) return <Navigate to="/home" replace />;
+  if (user?.role !== 'admin' && !canOpenSection(section, user?.role)) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
 
@@ -107,23 +109,33 @@ function App() {
             <Route path="/" element={<Navigate to="/home" replace />} />
             <Route path="home" element={<WorkspaceHomePage />} />
             <Route path="my-posts" element={<PersonalPostsRoute />} />
-            <Route path="user-management" element={<UserManagementPage />} />
+            <Route path="admin" element={<Navigate to="/admin/appointments" replace />} />
+            <Route path="admin/appointments" element={<AdminAppointmentsPage />} />
+            <Route path="admin/users" element={<Navigate to="/admin/users/professional" replace />} />
+            <Route path="admin/users/professional" element={<UserManagementPage key="professional" group="professional" />} />
+            <Route path="admin/users/mobile" element={<UserManagementPage key="mobile" group="mobile" />} />
+            <Route path="admin/files" element={<DoctorVerificationReviewPage />} />
+            <Route path="admin/config" element={<ModelCenterPage />} />
+            <Route path="admin/config/template" element={<ModelCenterPage />} />
+            <Route path="admin/profile" element={<ProfilePage />} />
+            <Route path="admin/password" element={<ChangePasswordPage />} />
+            <Route path="admin/*" element={<Navigate to="/admin" replace />} />
+            <Route path="user-management" element={<Navigate to="/admin/users" replace />} />
             <Route path="support-resources" element={<Navigate to="/model-analysis" replace />} />
             <Route path="research-data" element={<ResearchDataPage />} />
             <Route path="research-versions" element={<Navigate to="/research-data" replace />} />
             <Route path="research-experiments" element={<Navigate to="/research-data?view=catalog" replace />} />
             <Route path="model-analysis" element={<RiskPage />} />
             <Route path="research-models" element={<Navigate to="/model" replace />} />
-            <Route path="certification" element={<DoctorInvite />} />
+            <Route path="certification" element={<DoctorCertificationPage />} />
             <Route path="appointments" element={<DoctorCareRoute />} />
-            <Route path="admin-workspace" element={<AdminWorkspacePage />} />
             <Route path="authorized-users" element={<Navigate to="/care-users" replace />} />
             <Route path="care-users" element={<DoctorCareRoute />} />
-            <Route path="verification-review" element={<DoctorVerificationReviewPage />} />
-            <Route path="model" element={<ModelCenterPage />} />
+            <Route path="verification-review" element={<Navigate to="/admin/files" replace />} />
+            <Route path="model" element={<PersonalModelSettings />} />
             <Route path="model-config" element={<Navigate replace to="/model" />} />
             <Route path="model-config/template" element={<Navigate replace to="/model/template" />} />
-            <Route path="model/template" element={<ModelCenterPage />} />
+            <Route path="model/template" element={<PersonalModelSettings />} />
             <Route path="model-center" element={<Navigate to="/model" replace />} />
             <Route path="model-center/template" element={<Navigate to="/model/template" replace />} />
             <Route path="knowledge" element={<KnowledgeBasePage />} />

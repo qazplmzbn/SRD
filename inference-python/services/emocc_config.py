@@ -26,6 +26,7 @@ class EmoccDatasetSpec:
     description: str = ""
     features: List[str] = field(default_factory=list)
     performance_metrics: Dict[str, float] = field(default_factory=dict)
+    embedding_pickle_alias: Optional[str] = None
 
     def class_label_text(self) -> str:
         return "；".join(f"{idx}={label}" for idx, label in self.class_labels.items())
@@ -49,7 +50,13 @@ class EmoccDatasetSpec:
     def embedding_pickle_path(self) -> Optional[Path]:
         if not self.embedding_pickle_file:
             return None
-        return self.emocc_root() / self.embedding_pickle_file
+        root = self.emocc_root()
+        primary = root / self.embedding_pickle_file
+        if not primary.is_file() and self.embedding_pickle_alias:
+            alias = root / self.embedding_pickle_alias
+            if alias.is_file():
+                return alias
+        return primary
 
 
 EMOCC_DATASET_SPECS: Dict[str, EmoccDatasetSpec] = {
@@ -102,6 +109,7 @@ EMOCC_DATASET_SPECS: Dict[str, EmoccDatasetSpec] = {
         max_posts=300,
         emoji_csv_file="data/bigdata_emoji_batch.csv",
         embedding_pickle_file="data/bigdata_bert_embeddings.pkl",
+        embedding_pickle_alias="data/bigdata_bert.pkl",
         description="BERT + Emoji 双模态层次融合模型，面向 Bigdata 四分类风险检测。",
         features=[
             "输出四分类类别概率",
@@ -132,6 +140,7 @@ EMOCC_DATASET_SPECS: Dict[str, EmoccDatasetSpec] = {
         max_posts=1,
         emoji_csv_file="data/sigir_emojis.csv",
         embedding_pickle_file="data/sigir_bert_embeddings.pkl",
+        embedding_pickle_alias="data/sigir_bert.pkl",
         description="BERT + Emoji 双模态层次融合模型，面向 SIGIR 二分类高风险检测。",
         features=[
             "输出二分类类别概率",

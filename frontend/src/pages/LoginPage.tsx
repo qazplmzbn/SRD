@@ -32,12 +32,12 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await loginWeb(username.trim(), password);
-      if (!canUseResearch(res.user.role)) {
+      if (res.user.role !== 'admin' && !canUseResearch(res.user.role)) {
         setError('此账号没有专业工作台访问权限。个人账号请使用移动端。');
         return;
       }
       setAuth(res.user, res.token);
-      navigate(nextPath, { replace: true });
+      navigate(res.user.role === 'admin' ? '/admin' : nextPath, { replace: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '登录失败，请检查用户名和密码';
       setError(msg.replace(/API 请求失败: \d+ /, ''));

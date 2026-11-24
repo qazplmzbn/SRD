@@ -1,10 +1,10 @@
 
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Dropdown, Button } from 'antd';
+import { Dropdown } from 'antd';
 import { ChevronDown, Layers3 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { logout } from '../../api';
+import AccountMenu from './AccountMenu';
 import { canOpenSection } from '../../access';
 import './professional.css';
 
@@ -13,17 +13,12 @@ const groups = [
     { path: '/research-data', label: '研究数据', related: ['/archive'] },
 
     { path: '/model-analysis', label: '风险检测', related: ['/risk'] },
-    { path: '/model', label: '模型配置' },
-    { path: '/model/template', label: '提示词配置' },
+    { path: '/model', label: '个人模型设置' },
+    { path: '/model/template', label: '个人提示词' },
   ] },
   { label: '专业服务', items: [
     { path: '/certification', label: '医生认证' },
     { path: '/appointments', label: '预约与用户资料', related: ['/care-users', '/authorized-users', '/scale'] },
-  ] },
-  { label: '平台管理', items: [
-    { path: '/admin-workspace', label: '管理概览' },
-    { path: '/user-management', label: '用户档案' },
-    { path: '/verification-review', label: '认证审核' },
   ] },
 ];
 
@@ -34,7 +29,6 @@ function matchesRoute(pathname: string, path: string) {
 export default function ProfessionalLayout() {
   const user = useAuthStore(s => s.user);
 
-  const clearSession = useAuthStore(s => s.logout);
   const navigate = useNavigate();
   const { pathname, key } = useLocation();
   const [menu, setMenu] = useState<{ label: string; locationKey: string }>();
@@ -64,14 +58,11 @@ export default function ProfessionalLayout() {
         <NavLink className="pro-nav-item" to="/knowledge">知识库</NavLink>
         <NavLink className="pro-nav-item" to="/map">心理援助地图</NavLink>
         {groups.slice(1).map(renderGroup)}
+        {user?.role === 'admin' && <NavLink className="pro-nav-item" to="/admin">返回管理后台</NavLink>}
       </nav>
-      <Dropdown menu={{ items: [
-        { key: 'profile', label: '个人资料', onClick: () => navigate('/profile') },
-        { key: 'password', label: '修改密码', onClick: () => navigate('/change-password') },
-        { key: 'logout', label: '退出登录', onClick: async () => { try { await logout(); } finally { clearSession(); navigate('/login'); } } },
-      ] }} trigger={['click']}><Button className="pro-account">{user?.nickname || user?.username || '账号'}<ChevronDown size={14} /></Button></Dropdown>
+      <AccountMenu />
     </header>
-    <main className={`pro-content ${['/chat', '/map'].includes(pathname) ? 'pro-content-contained' : ''}`}><Outlet /></main>
+    <main className={`pro-content ${['/chat', '/map'].includes(pathname) ? 'pro-content-contained' : ''}`} style={pathname === '/chat' ? { paddingBottom: 'max(4px, env(safe-area-inset-bottom))' } : undefined}><Outlet /></main>
   </div>;
 }
 

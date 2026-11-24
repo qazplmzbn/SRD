@@ -35,15 +35,12 @@ const base = process.env.WORKSPACE_TEST_URL || 'http://127.0.0.1:5173';
         assert.equal(await page.getByRole('menuitem', { name: '风险检测', exact: true }).count(), 1);
         assert.equal(await nav.getByRole('button', { name: '工具中心' }).count(), 0);
         assert.equal(await page.getByRole('menuitem', { name: '批量实验' }).count(), 0);
-        assert.equal(await nav.getByRole('button', { name: '平台管理' }).count(), role === 'admin' ? 1 : 0);
-        const service = nav.getByRole('button', { name: role === 'admin' ? '平台管理' : '专业服务' });
-        await service.click();
-        await page.getByRole('menuitem', { name: role === 'admin' ? '模型配置' : role === 'doctor' ? '预约管理' : '医生认证', exact: true }).waitFor();
-        if(role==='researcher') assert.equal(await page.getByRole('menu').filter({has:page.getByRole('menuitem',{name:'医生认证',exact:true})}).getByRole('menuitem').count(),1);
-        if(role==='doctor') assert.equal(await page.getByRole('menuitem',{name:'医生认证',exact:true}).count(),0);
-        assert.equal(await page.getByRole('menuitem', { name: '预约管理', exact: true }).count(), role === 'doctor' ? 1 : 0);
-        assert.equal(await page.getByRole('menuitem', { name: '用户资料', exact: true }).count(), role === 'doctor' ? 1 : 0);
-        if (role !== 'admin') {
+        if (role === 'admin') {
+          await nav.getByRole('link',{name:'返回管理后台'}).click();
+          await page.getByRole('navigation',{name:'管理员主导航'}).getByRole('link',{name:'查看系统'}).waitFor();
+        } else {
+          await nav.getByRole('button',{name:'专业服务'}).click();
+          await page.getByRole('menuitem',{name:role==='doctor'?'预约与用户资料':'医生认证',exact:true}).waitFor();
           if(role==='doctor'){ await page.goto(`${base}/certification`); await page.waitForURL('**/appointments'); }
           await page.goto(`${base}/model-config`);
           await page.waitForURL('**/home');

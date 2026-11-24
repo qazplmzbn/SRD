@@ -1,15 +1,83 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Input, Pagination, Spin, Table, Tag } from 'antd';
+import { Alert, Button, Input, Modal, Table, Tabs, Tag, message } from 'antd';
+import { Link, useNavigate } from 'react-router-dom';
 import { request } from '../api';
-type User={id:number;username:string;nickname:string;role:string;active:boolean};
-type Post={id:string;content:string;source:string;publishedAt:string|null;importedAt:string};
-export default function UserManagementPage(){
- const [users,setUsers]=useState<User[]>([]),[total,setTotal]=useState(0),[page,setPage]=useState(1),[query,setQuery]=useState(''),[selected,setSelected]=useState<User>();
- const [busy,setBusy]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
- const [posts,setPosts]=useState<Post[]>([]),[postTotal,setPostTotal]=useState(0),[postPage,setPostPage]=useState(1),[postBusy,setPostBusy]=useState(false),[postError,setPostError]=useState('');
- useEffect(()=>{let active=true;setBusy(true);setError('');request<{items:User[];total:number}>(`/api/admin/users?query=${encodeURIComponent(query)}&page=${page}`).then(r=>{if(active){setUsers(r.items);setTotal(r.total)}}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[query,page,retry]);
- useEffect(()=>{let active=true;setPosts([]);setPostTotal(0);setPostError('');if(!selected)return;setPostBusy(true);request<{items:Post[];total:number}>(`/api/admin/users/${selected.id}/posts?page=${postPage}`).then(r=>{if(active){setPosts(r.items);setPostTotal(r.total)}}).catch(e=>{if(active)setPostError(e.message)}).finally(()=>{if(active)setPostBusy(false)});return()=>{active=false}},[selected,postPage,retry]);
- const roles:Record<string,string>={admin:'管理员',user:'个人用户',researcher:'研究者',doctor:'医生'};
- return <div className="pro-page"><div className="pro-page-heading"><div><h1>用户档案</h1><p className="pro-muted">查看用户资料和贴文记录。</p></div></div><div className="pro-split"><section className="pro-panel"><Input.Search placeholder="搜索用户名或昵称" allowClear onSearch={q=>{setQuery(q);setPage(1);setSelected(undefined)}} style={{marginBottom:20}}/>{error&&<Alert type="error" message={error} action={<Button onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>}<Table rowKey="id" loading={busy} dataSource={users} pagination={false} scroll={{x:400}} columns={[{title:'用户',render:(_,u)=><><strong>{u.nickname||u.username}</strong><p className="pro-muted">{u.username}</p></>},{title:'角色',dataIndex:'role',render:v=>roles[v]||v},{title:'查看',render:(_,u)=><Button type={selected?.id===u.id?'primary':'default'} onClick={()=>{setSelected(u);setPostPage(1)}}>查看资料</Button>}]} /><Pagination current={page} total={total} pageSize={20} showSizeChanger={false} onChange={p=>{setPage(p);setSelected(undefined)}} style={{marginTop:20}}/></section><section className="pro-panel">{!selected?<Empty description="选择用户查看资料与贴文"/>:<><h2 className="pro-section-title" style={{marginTop:0}}>用户资料</h2><dl className="pro-detail-grid"><dt>账号编号</dt><dd>{selected.id}</dd><dt>用户名</dt><dd>{selected.username}</dd><dt>昵称</dt><dd>{selected.nickname||'未填写'}</dd><dt>角色</dt><dd>{roles[selected.role]||selected.role}</dd><dt>状态</dt><dd>{selected.active?'正常':'停用'}</dd></dl><h2 className="pro-section-title">已上传贴文 {!postBusy&&!postError&&`· ${postTotal} 条`}</h2>{postBusy?<Spin/>:postError?<Alert type="error" message={postError} action={<Button onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>:posts.length?posts.map(p=><article className="pro-review-item" key={p.id}><div><Tag>{p.source}</Tag><p className="pro-muted">{p.publishedAt?new Date(p.publishedAt).toLocaleString():'发布时间未知'}</p><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{p.content}</p></div></article>):<Empty description="该用户暂无已上传的贴文"/>}<Pagination simple current={postPage} total={postTotal} pageSize={10} onChange={setPostPage} style={{marginTop:20}}/></>}</section></div></div>
-}
+import { useAuthStore } from '../store/authStore';
 
+type Account = { id: number; username: string; role: string; active: boolean };
+const roles: Record<string, string> = { admin: '管理员', user: '个人用户', researcher: '研究者', doctor: '医生' };
+
+export default function UserManagementPage({ group }: { group: 'mobile' | 'professional' }) {
+  const mobile = group === 'mobile';
+  const navigate = useNavigate();
+  const currentId = useAuthStore(s => s.user?.id);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+  const [target, setTarget] = useState<Account>();
+  const [saving, setSaving] = useState(false);
+
+  const refresh = () => setRevision(n => n + 1);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    request<{ items: Account[]; total: number }>(`/api/admin/users?group=${group}&query=${encodeURIComponent(query)}&page=${page}`)
+      .then(result => { if (active) { setAccounts(result.items); setTotal(result.total); } })
+      .catch(e => { if (active) { setAccounts([]); setTotal(0); setError(e.message); } })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [query, page, revision, group]);
+
+  function actionLabel(account: Account) {
+    if (mobile) return account.active ? '禁用账号' : '解禁账号';
+    return account.role === 'admin' ? '撤销管理员权限' : '设为管理员';
+  }
+
+  async function confirmChange() {
+    if (!target || saving) return;
+    setSaving(true);
+    try {
+      await request(`/api/admin/users/${target.id}/${mobile ? 'status' : 'role'}`, {
+        method: 'PUT', body: JSON.stringify(mobile ? { active: !target.active } :
+          { currentRole: target.role, role: target.role === 'admin' ? 'researcher' : 'admin' }),
+      });
+      message.success('账号权限已更新');
+      setTarget(undefined);
+      refresh();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '更新失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="pro-page">
+    <h1 className="sr-only">用户管理</h1>
+    <Tabs activeKey={group} onChange={key => navigate(`/admin/users/${key}`)} items={[
+      { key: 'professional', label: '专业用户（Web 端）' }, { key: 'mobile', label: '普通用户（移动端）' },
+    ]} />
+    {!mobile && <div style={{ marginBottom: 16 }}><Link to="/admin/files">审核医生认证申请</Link></div>}
+    <Input.Search aria-label="搜索用户名" placeholder="搜索用户名" allowClear maxLength={100}
+      onSearch={value => { setQuery(value.trim()); setPage(1); }} style={{ maxWidth: 360, marginBottom: 16 }} />
+    {error && <Alert type="error" message={error} action={<Button onClick={refresh}>重试</Button>} style={{ marginBottom: 16 }} />}
+    <Table<Account> rowKey="id" loading={loading} dataSource={accounts} scroll={{ x: 520 }}
+      pagination={{ current: page, total, pageSize: 20, showSizeChanger: false, onChange: setPage }}
+      columns={[
+        { title: '用户名', dataIndex: 'username' },
+        { title: '角色', dataIndex: 'role', render: role => <Tag>{roles[role] || role}</Tag> },
+        { title: '账号状态', dataIndex: 'active', render: active => <Tag color={active ? 'green' : undefined}>{active ? '启用' : '停用'}</Tag> },
+        { title: '操作', render: (_, account) => account.role === 'doctor' ? '由医生认证管理' : account.id === currentId ? '当前账号' :
+          <Button danger={mobile && !!account.active} disabled={loading} onClick={() => setTarget(account)}>{actionLabel(account)}</Button> },
+      ]} />
+    <Modal open={!!target} title={target && actionLabel(target)}
+      onCancel={() => { if (!saving) setTarget(undefined); }} onOk={confirmChange}
+      okText="确认" cancelText="取消" confirmLoading={saving}>
+      {target && <p>确认对 {target.username} 执行「{actionLabel(target)}」？</p>}
+    </Modal>
+  </div>;
+}

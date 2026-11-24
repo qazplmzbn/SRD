@@ -94,7 +94,10 @@ public class DoctorVerificationService {
         } else {
             if (!"PENDING".equals(status) || !role.equals("researcher")) throw new BusinessException(HttpStatus.CONFLICT, "申请状态已变化，请刷新后处理");
             next = input.decision().equals("APPROVE") ? "APPROVED" : "REJECTED";
-            if (next.equals("APPROVED")) jdbc.update("UPDATE app_users SET role='doctor' WHERE id=? AND role='researcher'", owner);
+            if (next.equals("APPROVED")) {
+                jdbc.update("UPDATE app_users SET role='doctor' WHERE id=? AND role='researcher'", owner);
+                jdbc.update("INSERT INTO care_doctors(doctor_id) VALUES (?) ON DUPLICATE KEY UPDATE doctor_id=VALUES(doctor_id)", owner);
+            }
         }
         jdbc.update("UPDATE doctor_applications SET status=?,reviewed_at=?,reviewer_id=?,review_reason=? WHERE id=?",
                 next, Timestamp.from(Instant.now()), actor.getUserId(), input.reason().strip(), id);

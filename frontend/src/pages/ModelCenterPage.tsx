@@ -863,7 +863,7 @@ function ModelDetailModal({
 }
 
 // ==================== 主页面组件 ====================
-export function ModelCenterTabs({base}:{base:'/model'|'/model-config'}) {
+export function ModelCenterTabs({base}:{base:'/model'|'/model-config'|'/admin/config'}) {
   const navigate = useNavigate();
   const active = useLocation().pathname.endsWith('/template') ? 'template' : 'model';
   return <nav className="shrink-0 bg-white rounded-2xl shadow-sm border border-[#E2E8F0] p-1.5 inline-flex self-start">
@@ -1078,7 +1078,7 @@ export default function ModelCenterPage() {
   return (
     <div className="model-center-original flex flex-1 flex-col min-h-0 w-full gap-4 md:gap-5 animate-fade-in">
       {/* 选项卡 */}
-      <ModelCenterTabs base="/model"/>
+      <ModelCenterTabs base="/admin/config"/>
 
       <div className="flex-1 min-h-0 overflow-auto">
         {activeTab === 'model' ? (

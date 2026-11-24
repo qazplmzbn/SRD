@@ -23,34 +23,22 @@ import java.util.*;
 public class CareController {
     private final JdbcTemplate db;
     private final ObjectMapper json;
-    private final String invite;
     @Autowired private com.vis4srd.risk.service.RiskService riskService;
     @Autowired private com.vis4srd.risk.service.PostReviewService reviews;
     @Value("${CARE_ALLOW_EXTERNAL_MODELS:false}") private boolean allowExternalModels;
-    public CareController(@Qualifier("mysqlJdbcTemplate") JdbcTemplate db, ObjectMapper json,
-                          @Value("${DOCTOR_CERTIFICATION_INVITE_CODE:}") String invite) {
-        this.db=db; this.json=json; this.invite=invite;
+    public CareController(@Qualifier("mysqlJdbcTemplate") JdbcTemplate db, ObjectMapper json) {
+        this.db=db; this.json=json;
     }
-    public record Invite(@NotBlank @Size(max=256) String code) {}
     public record Post(@NotBlank @Size(max=8000) String text, @Size(max=80) String date, @Size(max=80) String platform) {}
     public record Result(@NotBlank @Size(max=200) String name, @NotNull @Min(0) Integer score, @Size(max=80) String date) {}
     public record Snapshot(@NotNull @Size(max=100) List<@NotNull @Valid Post> posts, @NotNull @Size(max=100) List<@NotNull @Valid Result> results) {}
-    public record Booking(@Positive long doctorId, @NotNull @Future Instant scheduledAt, @NotNull @Valid Snapshot snapshot) {}
+    public record Booking(@Positive long doctorId, @NotNull @Future Instant scheduledAt, @NotNull @Valid Snapshot snapshot, @AssertTrue Boolean consent) {}
     private AuthUser actor(String... roles) {
         var u=SecurityUtils.requireCurrentUser();
         if(!Arrays.asList(roles).contains(u.getRole())) throw new BusinessException(HttpStatus.FORBIDDEN,"此账号无权执行该操作");
         return u;
     }
     private static BusinessException unavailable() { return new BusinessException(HttpStatus.NOT_FOUND,"预约不存在或当前不可访问"); }
-    @PostMapping("/certification") @Transactional(transactionManager="mysqlTransactionManager")
-    public ApiResponse<Boolean> certify(@Valid @RequestBody Invite input) {
-        var u=actor("researcher","doctor");
-        if(invite.isBlank() || !MessageDigest.isEqual(invite.getBytes(StandardCharsets.UTF_8), input.code().getBytes(StandardCharsets.UTF_8)))
-            throw new BusinessException(HttpStatus.FORBIDDEN,"医生邀请码无效或认证尚未开放");
-        db.update("UPDATE app_users SET role='doctor' WHERE id=? AND role IN ('researcher','doctor')",u.getUserId());
-        db.update("INSERT INTO care_doctors(doctor_id) VALUES (?) ON DUPLICATE KEY UPDATE doctor_id=VALUES(doctor_id)",u.getUserId());
-        return ApiResponse.ok(true);
-    }
     private static final String DIRECTORY=" FROM care_doctors d JOIN app_users u ON d.doctor_id=u.id WHERE u.role='doctor' AND u.is_active=true";
     @GetMapping("/doctors") public ApiResponse<?> doctors() {
         actor("user"); return ApiResponse.ok(db.queryForList("SELECT u.id, COALESCE(u.nickname,u.username) AS name"+DIRECTORY+" ORDER BY u.id"));
@@ -69,7 +57,9 @@ public class CareController {
     @GetMapping("/appointments") public ApiResponse<?> list(jakarta.servlet.http.HttpServletResponse response) {
         var u=actor("user","doctor"); boolean patient="user".equals(u.getRole());
         response.setHeader("Cache-Control","no-store");
-        return ApiResponse.ok(db.queryForList("SELECT a.id,a.state,(a.state='ACCEPTED') AS shared,a.scheduled_at AS scheduledAt, COALESCE(u.nickname,u.username) AS name"+(patient?"":", a.patient_id AS patientId, CASE WHEN a.state='ACCEPTED' THEN SHA2(a.snapshot,256) END AS snapshotVersion")+" FROM care_appointments a JOIN app_users u ON u.id="+(patient?"a.doctor_id WHERE a.patient_id=?":"a.patient_id WHERE u.role='user' AND a.doctor_id=? AND EXISTS(SELECT 1 FROM care_doctors d WHERE d.doctor_id=a.doctor_id)")+" ORDER BY a.created_at DESC",u.getUserId()));
+        var rows = db.queryForList("SELECT a.id,CASE WHEN a.state='PENDING' AND NOT EXISTS(SELECT 1 FROM care_appointment_reviews r WHERE r.appointment_id=a.id AND r.decision='APPROVED') THEN 'ADMIN_REVIEW' ELSE a.state END AS state,a.scheduled_at AS scheduledAt, COALESCE(u.nickname,u.username) AS name"+(patient?"":", a.patient_id AS patientId, CASE WHEN a.state='ACCEPTED' THEN SHA2(a.snapshot,256) END AS snapshotVersion")+" FROM care_appointments a JOIN app_users u ON u.id="+(patient?"a.doctor_id WHERE a.patient_id=?":"a.patient_id WHERE u.role='user' AND a.doctor_id=? AND EXISTS(SELECT 1 FROM care_doctors d WHERE d.doctor_id=a.doctor_id)")+" ORDER BY a.created_at DESC",u.getUserId());
+        rows.forEach(row -> row.put("shared", "ACCEPTED".equals(row.get("state"))));
+        return ApiResponse.ok(rows);
     }
     private String reviewInput(String id,long doctor){var rows=db.queryForList("SELECT COALESCE(a.snapshot,JSON_OBJECT('posts',JSON_ARRAY(),'results',JSON_ARRAY())) FROM care_appointments a JOIN care_doctors d ON d.doctor_id=a.doctor_id JOIN app_users p ON p.id=a.patient_id AND p.role='user' WHERE a.id=? AND a.doctor_id=? AND a.state='ACCEPTED'",String.class,id,doctor);if(rows.isEmpty())throw unavailable();return rows.get(0);}
     public record ReviewSelection(@Positive long modelId, Long templateId,
@@ -113,10 +103,10 @@ public class CareController {
     @PostMapping("/appointments/{id}/{action}") public ApiResponse<Boolean> transition(@PathVariable String id,@PathVariable String action) {
         String sql; AuthUser u;
         switch(action) {
-            case "accept" -> {u=actor("doctor"); sql="SET state='ACCEPTED' WHERE id=? AND doctor_id=? AND state='PENDING' AND EXISTS(SELECT 1 FROM care_doctors d WHERE d.doctor_id=care_appointments.doctor_id)";}
+            case "accept" -> {u=actor("doctor"); sql="SET state='ACCEPTED' WHERE id=? AND doctor_id=? AND state='PENDING' AND EXISTS(SELECT 1 FROM care_appointment_reviews r WHERE r.appointment_id=care_appointments.id AND r.decision='APPROVED') AND EXISTS(SELECT 1 FROM care_doctors d WHERE d.doctor_id=care_appointments.doctor_id)";}
             case "cancel" -> {u=actor("user"); sql="SET state='CANCELLED', snapshot=NULL WHERE id=? AND patient_id=? AND state IN ('PENDING','ACCEPTED')";}
             case "end" -> {u=actor("doctor"); sql="SET state='ENDED', snapshot=NULL WHERE id=? AND doctor_id=? AND state='ACCEPTED'";}
-            case "reject" -> {u=actor("doctor"); sql="SET state='REJECTED', snapshot=NULL WHERE id=? AND doctor_id=? AND state='PENDING'";}
+            case "reject" -> {u=actor("doctor"); sql="SET state='REJECTED', snapshot=NULL WHERE id=? AND doctor_id=? AND state='PENDING' AND EXISTS(SELECT 1 FROM care_appointment_reviews r WHERE r.appointment_id=care_appointments.id AND r.decision='APPROVED')";}
             default -> throw unavailable();
         }
         if(db.update("UPDATE care_appointments "+sql,id,u.getUserId())!=1) throw unavailable();

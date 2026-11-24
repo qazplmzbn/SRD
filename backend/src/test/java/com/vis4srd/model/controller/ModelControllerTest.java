@@ -56,14 +56,10 @@ class ModelControllerTest {
 
     @Test
     @WithMockUser(roles = "ADMIN")
-    void ollamaStatusShouldNotThrowWhenUnreachable() throws Exception {
+    void disabledOllamaEndpointIsForbidden() throws Exception {
         mockMvc.perform(get("/api/models/ollama/status")
                         .param("base_url", "http://127.0.0.1:1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.healthy").value(false))
-                .andExpect(jsonPath("$.data.available").value(false))
-                .andExpect(jsonPath("$.data.base_url").exists());
+                .andExpect(status().isForbidden());
     }
 
     @Test

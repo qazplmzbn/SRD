@@ -56,10 +56,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE,"/api/risk/**").hasRole("ADMIN")
                         .requestMatchers("/api/risk/predict/**").hasRole("ADMIN")
                         .requestMatchers("/api/research/**").hasAnyRole("ADMIN", "RESEARCHER", "DOCTOR")
-                        .requestMatchers("/api/me/doctor-applications").hasAnyRole("RESEARCHER", "DOCTOR", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/me/doctor-applications").hasRole("RESEARCHER")
+                        .requestMatchers("/api/me/doctor-applications").hasAnyRole("RESEARCHER", "DOCTOR")
                         .requestMatchers(HttpMethod.GET, "/api/models/api/configured").hasAnyRole("DOCTOR", "RESEARCHER", "ADMIN")
-                        .requestMatchers("/api/models", "/api/models/{id:[0-9]+}", "/api/models/{id:[0-9]+}/api-key",
-                                "/api/models/templates", "/api/models/templates/{id:[0-9]+}").hasAnyRole("DOCTOR", "RESEARCHER", "ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/models", "/api/models/templates").hasAnyRole("DOCTOR", "RESEARCHER", "ADMIN")
                         .requestMatchers("/api/models", "/api/models/**").hasRole("ADMIN")
                         .requestMatchers("/api/home", "/api/home/**", "/api/users", "/api/users/**",
                                 "/api/datasets", "/api/datasets/**", "/api/risk", "/api/risk/**",

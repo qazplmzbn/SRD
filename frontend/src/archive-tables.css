@@ -1,5 +1,6 @@
 /* Shared archive list surface. Keep scrolling and fixed columns with the table owner. */
 :root { --list-line:#dce4ee; --list-divider:#eaf0f6; --list-heading:#415168; --list-hover:#f7f9fc; --list-radius:16px; --list-header:linear-gradient(180deg,#fdeedc,#fbd9be); }
+.admin-console { --list-line:#60a5fa; --list-divider:#60a5fa; }
 @media screen {
 body table:not(.ant-table-wrapper table), body .ant-table-wrapper .ant-table-container {
   border:1px solid var(--list-line); border-radius:var(--list-radius); background:white;

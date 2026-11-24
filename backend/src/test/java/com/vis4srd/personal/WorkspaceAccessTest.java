@@ -8,6 +8,7 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -28,13 +29,20 @@ class WorkspaceAccessTest {
         for (String url : new String[]{"/api/users", "/api/datasets", "/api/risk/task-types"}) {
             mvc.perform(get(url)).andExpect(status().isOk());
         }
-        mvc.perform(get("/api/models/api/configured")).andExpect(status().isForbidden());
+        assertPublicModelMetadata();
     }
 
     @Test @WithMockUser(roles = "RESEARCHER")
     void researcherCanReadArchivesButNotModelSecrets() throws Exception {
         mvc.perform(get("/api/users")).andExpect(status().isOk());
-        mvc.perform(get("/api/models/api/configured")).andExpect(status().isForbidden());
+        assertPublicModelMetadata();
+    }
+
+    private void assertPublicModelMetadata() throws Exception {
+        mvc.perform(get("/api/models/api/configured")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[*].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data[*].api_key").doesNotExist());
     }
 
     @Test @WithMockUser(roles = "ADMIN")

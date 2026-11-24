@@ -923,6 +923,9 @@ public class RiskService {
             enrichWithLlmClinicalAnalysis(sidecar, posts, modelType, fusionModelId);
             return sidecar;
         }
+        if (FEA_DATASETS.contains(dataSource.trim().toLowerCase(Locale.ROOT))) {
+            throw new BusinessException("平台数据集预计算特征推理失败，请检查侧车日志、模型权重和该档案的特征匹配情况");
+        }
         if (!pythonInferenceProperties.isFallbackHeuristic()) {
             throw new BusinessException("推理侧车不可用，且已禁用启发式回退（请启动 inference-python :8001）");
         }
@@ -997,7 +1000,7 @@ public class RiskService {
                         .orElse(null);
             }
         } catch (Exception ex) {
-            log.warn("调用推理侧车异常，将回退启发式: {}", ex.getMessage());
+            log.warn("调用推理侧车异常: {}", ex.getMessage());
         }
         return null;
     }

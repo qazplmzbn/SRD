@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS care_live_grants (
 CREATE TABLE IF NOT EXISTS care_analysis_grants (appointment_id VARCHAR(36) PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS care_booking_consent (appointment_id VARCHAR(36) PRIMARY KEY);
 
+CREATE TABLE IF NOT EXISTS care_appointment_reviews (
+ appointment_id VARCHAR(36) PRIMARY KEY, reviewer_id BIGINT NOT NULL,
+ decision VARCHAR(8) NOT NULL, opinion VARCHAR(1000) NOT NULL,
+ reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS admin_appointment_opinions (
+ appointment_id VARCHAR(36) PRIMARY KEY, reviewer_id BIGINT NOT NULL,
+ opinion VARCHAR(1000) NOT NULL, reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS douyin_auth_state (
  owner_id BIGINT PRIMARY KEY, nonce VARCHAR(64) NOT NULL, expires BIGINT NOT NULL
 );

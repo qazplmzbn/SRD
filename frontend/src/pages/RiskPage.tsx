@@ -479,7 +479,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
             signal: controller.signal,
           });
           const data = await response.json();
-          if (!data.success) throw new Error(data.error || '创建失败');
+          if (!response.ok || !data.success) throw new Error(data.message || data.error || `创建失败（HTTP ${response.status}）`);
           const taskData = data.data;
           newTask = {
             id: String(taskData.id),
@@ -513,7 +513,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
             }),
           });
           const data = await response.json();
-          if (!data.success) throw new Error(data.error || '创建失败');
+          if (!response.ok || !data.success) throw new Error(data.message || data.error || `创建失败（HTTP ${response.status}）`);
           const taskData = data.data;
           newTask = {
             id: String(taskData.id),
@@ -553,7 +553,7 @@ function CreateTaskModal({ isOpen, onClose, onCreated, dataSources, initialSelec
         });
         const data = await response.json();
 
-        if (!data.success) throw new Error(data.error || '创建失败');
+        if (!response.ok || !data.success) throw new Error(data.message || data.error || `创建失败（HTTP ${response.status}）`);
 
         const taskData = data.data;
         newTask = {

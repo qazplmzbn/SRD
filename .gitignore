@@ -146,3 +146,4 @@ AGENTS.md
 
 frontend/.npm-cache/
 frontend/dist-mobile/
+/backend/config/local-admin.sql

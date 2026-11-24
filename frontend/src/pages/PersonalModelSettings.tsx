@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {Navigate, useLocation} from 'react-router-dom';
+import {useLocation} from 'react-router-dom';
 import {ModelCenterTabs} from './ModelCenterPage';
 import {Alert,Button,Checkbox,Radio,Spin,message} from 'antd';
 import {Bot,Cloud,Save} from 'lucide-react';
@@ -11,7 +11,6 @@ import {readPreferences,savePreferences,questions} from '../professionalPreferen
 
 export default function PersonalModelSettings(){
   const user=useAuthStore(s=>s.user), template=useLocation().pathname.endsWith('/template');
-  if(user?.role==='admin')return <Navigate replace to={template?'/model-config/template':'/model-config'}/>;
   return user&&<Preferences key={`${user.id}:${template}`} id={user.id} doctor={user.role==='doctor'} template={template}/>;
 }
 function Preferences({id,doctor,template}:{id:number;doctor:boolean;template:boolean}){

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag } from 'antd';
-import { request, login, register, fetchMe } from '../api';
-import { useAuthStore } from '../store/authStore';
+import { request, login, register } from '../api';
 import type { LocalPost } from './MobileRecords';
 import type { AssessmentRecord } from './MobileAssessment';
 import { CalendarPlus, ChevronDown } from 'lucide-react';
@@ -13,20 +12,7 @@ import { mobileCall, readSession, saveSession, watchSession } from './mobileSess
 
 type Row = { id:string; name:string; scheduledAt:string; state:string; patientId?:number; shared?:boolean; };
 type Shared = { posts:{text:string;date:string}[]; results:AssessmentRecord[] };
-const labels:Record<string,string>={PENDING:'待接受',ACCEPTED:'已接受',CANCELLED:'已取消',ENDED:'已结束',REJECTED:'已拒绝'};
-
-export function DoctorInvite() {
-  const [code,setCode]=useState(''),[notice,setNotice]=useState('');
-  const update=useAuthStore(s=>s.updateUser);
-  const role=useAuthStore(s=>s.user?.role);
-  const [busy,setBusy]=useState(false);
-  if(role==='doctor')return <Navigate to="/appointments" replace/>;
-  return <section className="pro-certification"><form className="pro-panel" onSubmit={async e=>{
-    e.preventDefault();if(busy)return;setBusy(true);setNotice('');
-    try{await request('/api/care/certification',{method:'POST',body:JSON.stringify({code:code.trim()})});update(await fetchMe())}
-    catch(err){setNotice(String(err))}finally{setBusy(false)}
-  }}><h1>医生认证</h1><label htmlFor="doctor-invite">医生邀请码</label><Input.Password id="doctor-invite" required value={code} onChange={e=>setCode(e.target.value)}/>{notice&&<p role="alert">{notice}</p>}<Button htmlType="submit" type="primary" disabled={!code.trim()} loading={busy}>认证</Button></form></section>;
-}
+const labels:Record<string,string>={ADMIN_REVIEW:'待管理员审批',PENDING:'待接受',ACCEPTED:'已接受',CANCELLED:'已取消',ENDED:'已结束',REJECTED:'已拒绝'};
 
 export default function CareWorkspace({mobile=false,account=false,posts=[],results=[],filter='ALL'}:{mobile?:boolean;account?:boolean;posts?:LocalPost[];results?:AssessmentRecord[];filter?:string}) {
   const [session,setSession]=useState(()=>mobile?readSession():null);
@@ -105,7 +91,7 @@ export default function CareWorkspace({mobile=false,account=false,posts=[],resul
       {bookingIssue()&&<small id="booking-hint">{bookingIssue()}</small>}
       <Button size="large" type="primary" aria-describedby="booking-hint" disabled={!!bookingIssue()} loading={busy} htmlType="submit">同意并提交预约</Button></form>}{notice}
     <div className="booking-heading booking-history"><h2>预约记录</h2></div>{rows.length===0&&<p className="booking-empty">暂无预约</p>}{rows.map(r=><section className="booking-row" key={r.id}><header><h3>{r.name}</h3><Tag color={r.state==='ACCEPTED'?'green':r.state==='PENDING'?'gold':undefined}>{labels[r.state]}</Tag></header><time dateTime={r.scheduledAt}>{new Date(r.scheduledAt).toLocaleString('zh-CN',{dateStyle:'medium',timeStyle:'short'})}</time><Space wrap>
-      {mobile&&['PENDING','ACCEPTED'].includes(r.state)&&<Button disabled={busy} onClick={()=>action(r.id,'cancel')}>取消预约</Button>}
+      {mobile&&['ADMIN_REVIEW','PENDING','ACCEPTED'].includes(r.state)&&<Button disabled={busy} onClick={()=>action(r.id,'cancel')}>取消预约</Button>}
       {!mobile&&r.state==='PENDING'&&<><Button disabled={busy} onClick={()=>action(r.id,'accept')}>接受预约</Button><Button disabled={busy} onClick={()=>action(r.id,'reject')}>拒绝</Button></>}
       {!mobile&&r.state==='ACCEPTED'&&<><Button disabled={busy} onClick={()=>run(async()=>{setShared(null);setShared(await call<Shared>(`appointments/${r.id}/records`))})}>查看共享资料</Button><Button disabled={busy} onClick={()=>action(r.id,'end')}>结束预约</Button></>}
     </Space></section>)}{shared&&<section><h2>本次预约共享资料</h2>{shared.posts.map((p,i)=><p key={i}>{p.date} · {p.text}</p>)}{shared.results.map((r,i)=><p key={i}>{r.date} · {r.name} · {r.score} 分</p>)}{!shared.posts.length&&!shared.results.length&&<p>用户未选择记录</p>}<Button onClick={()=>setShared(null)}>关闭资料</Button></section>}</section>;

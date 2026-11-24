@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties="DOCTOR_CERTIFICATION_INVITE_CODE=integration-only")
+@SpringBootTest
 @AutoConfigureMockMvc
 @Transactional(transactionManager="mysqlTransactionManager")
 class DoctorVerificationIntegrationTest {
@@ -26,9 +26,51 @@ class DoctorVerificationIntegrationTest {
     @Autowired @Qualifier("mysqlJdbcTemplate") JdbcTemplate jdbc;
     record Account(long id, String token, String username) {}
 
+    @Test void adminUserManagementExposesOnlyAccountAccessFields() throws Exception {
+        var user = account("user");
+        var admin = account("admin");
+        String url = "/api/admin/users";
+        mvc.perform(get(url).header("Authorization", user.token())).andExpect(status().isForbidden());
+        String body = mvc.perform(get(url).param("query", user.username()).header("Authorization", admin.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items.length()").value(1))
+                .andReturn().getResponse().getContentAsString();
+        var fields = mapper.readTree(body).path("data").path("items").get(0).fieldNames();
+        assertThat(fields).toIterable().containsExactlyInAnyOrder("id", "username", "role", "active");
+        mvc.perform(get(url + "/" + user.id() + "/posts").header("Authorization", admin.token()))
+                .andExpect(status().isNotFound());
+        String roleUrl = url + "/" + user.id() + "/role";
+        String change = "{\"currentRole\":\"user\",\"role\":\"researcher\"}";
+        mvc.perform(put(roleUrl).header("Authorization", user.token()).contentType("application/json").content(change))
+                .andExpect(status().isForbidden());
+        mvc.perform(put(roleUrl).header("Authorization", admin.token()).contentType("application/json").content(change))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get(url).param("group", "professional").param("query", user.username()).header("Authorization", admin.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mvc.perform(get(url).param("group", "professional").param("query", admin.username()).header("Authorization", admin.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1));
+    }
+
+    @Test void onlyAdminCanRecordAppointmentOpinionOrConfigurePlatformModels() throws Exception {
+        jdbc.execute("CREATE TABLE IF NOT EXISTS admin_appointment_opinions (appointment_id VARCHAR(36) PRIMARY KEY, reviewer_id BIGINT, opinion VARCHAR(1000), reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        var patient = account("user");
+        var doctor = account("doctor");
+        var admin = account("admin");
+        String id = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO care_appointments(id,patient_id,doctor_id,state,shared,scheduled_at) VALUES(?,?,?,'PENDING',false,CURRENT_TIMESTAMP)", id, patient.id(), doctor.id());
+        String url = "/api/admin/appointments/" + id + "/review";
+        for (var actor : new Account[]{patient, doctor, account("researcher")}) {
+            mvc.perform(get("/api/admin/appointments").header("Authorization",actor.token())).andExpect(status().isForbidden());
+            mvc.perform(post(url).header("Authorization",actor.token()).contentType("application/json").content("{\"decision\":\"APPROVED\",\"opinion\":\"recorded\"}")).andExpect(status().isForbidden());
+            mvc.perform(post("/api/models/templates").header("Authorization",actor.token())).andExpect(status().isForbidden());
+        }
+        mvc.perform(post(url).header("Authorization",admin.token()).contentType("application/json").content("{\"decision\":\"APPROVED\",\"opinion\":\"recorded\"}")).andExpect(status().isOk());
+        mvc.perform(get("/api/admin/appointments").header("Authorization",admin.token())).andExpect(status().isOk()).andExpect(jsonPath("$.data.items").isArray()).andExpect(jsonPath("$.data.items[0].snapshot").doesNotExist());
+        mvc.perform(post(url).header("Authorization",admin.token()).contentType("application/json").content("{\"decision\":\"APPROVED\",\"opinion\":\"second\"}")).andExpect(status().isConflict());
+    }
+
     @Test void careAccessRequiresConsentCertificationAndAcceptedBooking() throws Exception {
-        var patient=account("user"); var doctor=account("researcher"); var other=account("doctor");
-        mvc.perform(post("/api/care/certification").header("Authorization",doctor.token()).contentType("application/json").content("{\"code\":\"integration-only\"}")).andExpect(status().isOk());
+        var patient=account("user"); var doctor=account("doctor"); var other=account("doctor");
+        jdbc.update("INSERT INTO care_doctors(doctor_id) VALUES (?)",doctor.id());
         var booking=new java.util.HashMap<String,Object>(); booking.put("doctorId",doctor.id());booking.put("scheduledAt",java.time.Instant.now().plusSeconds(86400).toString());
         booking.put("snapshot",Map.of("posts",java.util.List.of(Map.of("text","fixture")),"results",java.util.List.of(Map.of("name","fixture","score",3))));
         booking.put("consent",false);
@@ -37,6 +79,8 @@ class DoctorVerificationIntegrationTest {
         String body=mvc.perform(post("/api/care/appointments").header("Authorization",patient.token()).contentType("application/json").content(mapper.writeValueAsBytes(booking))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String path="/api/care/appointments/"+mapper.readTree(body).path("data").asText();
         mvc.perform(get(path+"/records").header("Authorization",doctor.token())).andExpect(status().isNotFound());
+        mvc.perform(post(path+"/accept").header("Authorization",doctor.token())).andExpect(status().isNotFound());
+        mvc.perform(post(path.replace("/care/", "/admin/")+"/review").header("Authorization",account("admin").token()).contentType("application/json").content("{\"decision\":\"APPROVED\",\"opinion\":\"ok\"}")).andExpect(status().isOk());
         mvc.perform(post(path+"/accept").header("Authorization",doctor.token())).andExpect(status().isOk());
         mvc.perform(get("/api/care/appointments").header("Authorization",doctor.token())).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.data[0].patientId").value((int) patient.id())).andExpect(jsonPath("$.data[0].shared").value(true));
         mvc.perform(get("/api/care/appointments").header("Authorization",other.token())).andExpect(status().isOk()).andExpect(jsonPath("$.data").isEmpty());
@@ -121,7 +165,7 @@ class DoctorVerificationIntegrationTest {
     }
     @Test void consentFileFormatSizeAndApplicantRoleValidated() throws Exception {
         var user=account("researcher"); var ordinary=account("user"); var doctor=account("doctor");
-        for (var forbidden : new Account[]{ordinary,doctor}) {
+        for (var forbidden : new Account[]{ordinary,doctor,account("admin")}) {
             mvc.perform(multipart("/api/me/doctor-applications").file(input(true)).file(proof()).header("Authorization",forbidden.token())).andExpect(status().isForbidden());
         }
         mvc.perform(multipart("/api/me/doctor-applications").file(input(false)).file(proof()).header("Authorization",user.token())).andExpect(status().isBadRequest());
